@@ -3,6 +3,7 @@ import { auth } from "@/auth";
 import { db } from "@/db/client";
 import { connectedLeagues } from "@/db/schema";
 import { ConnectSleeperForm } from "@/components/connect-sleeper-form";
+import { ConnectEspnForm } from "@/components/connect-espn-form";
 
 const PLATFORM_LABEL: Record<string, string> = {
   sleeper: "Sleeper",
@@ -32,16 +33,28 @@ export default async function DashboardPage() {
         </p>
       </div>
 
-      <section className="rounded-xl border border-border bg-card p-6">
-        <h2 className="mb-1 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-          Connect a platform
-        </h2>
-        <p className="mb-4 text-sm text-muted-foreground">
-          Sleeper is supported today. ESPN and Yahoo connections are coming
-          next.
-        </p>
-        <ConnectSleeperForm />
-      </section>
+      <div className="grid gap-6 lg:grid-cols-2">
+        <section className="rounded-xl border border-border bg-card p-6">
+          <h2 className="mb-1 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+            Connect Sleeper
+          </h2>
+          <p className="mb-4 text-sm text-muted-foreground">
+            Just your username — Sleeper&apos;s API is public and read-only.
+          </p>
+          <ConnectSleeperForm />
+        </section>
+
+        <section className="rounded-xl border border-border bg-card p-6">
+          <h2 className="mb-1 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+            Connect ESPN
+          </h2>
+          <p className="mb-4 text-sm text-muted-foreground">
+            League ID and season are enough for public leagues; private
+            leagues also need the espn_s2 and SWID cookies.
+          </p>
+          <ConnectEspnForm />
+        </section>
+      </div>
 
       <section>
         <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
@@ -50,8 +63,8 @@ export default async function DashboardPage() {
 
         {leagues.length === 0 ? (
           <div className="rounded-xl border border-dashed border-border p-8 text-center text-sm text-muted-foreground">
-            No leagues connected yet. Connect your Sleeper account above to
-            get started.
+            No leagues connected yet. Connect Sleeper or ESPN above to get
+            started.
           </div>
         ) : (
           <ul className="grid gap-3 sm:grid-cols-2">

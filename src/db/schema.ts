@@ -76,6 +76,8 @@ export const platformIdentities = sqliteTable(
       .notNull(),
     platformUserId: text("platformUserId").notNull(),
     platformUsername: text("platformUsername"),
+    /** Encrypted credential material (e.g. ESPN's espn_s2 cookie). Never stored in plaintext. */
+    encryptedSecret: text("encryptedSecret"),
     createdAt: integer("createdAt", { mode: "timestamp_ms" })
       .notNull()
       .$defaultFn(() => new Date()),

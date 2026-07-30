@@ -5,8 +5,8 @@ your rosters across all of them — e.g. if you have Patrick Mahomes on one
 team and are playing against him on another, see exactly what score keeps
 you optimal in both matchups.
 
-This is the initial setup: Next.js app, self-hosted auth + database, and a
-working Sleeper integration. ESPN and Yahoo, plus the cross-league matchup
+This is the initial setup: Next.js app, self-hosted auth + database, and
+working Sleeper and ESPN integrations. Yahoo, plus the cross-league matchup
 comparison itself, come next.
 
 ## Stack
@@ -31,6 +31,8 @@ src/auth.ts                       Auth.js config (Credentials provider, Drizzle 
 src/db/schema.ts                  Drizzle schema: auth tables + platform_identities/connected_leagues
 src/db/client.ts                  libSQL client (local file or Turso, same code path)
 src/lib/sleeper/                 Sleeper API client + types
+src/lib/espn/                     ESPN API client (wraps espn-fantasy-football-api)
+src/lib/crypto/secrets.ts         AES-256-GCM encrypt/decrypt for stored credentials (ESPN cookies)
 drizzle/                          Generated SQL migrations
 ```
 
@@ -59,9 +61,14 @@ drizzle/                          Generated SQL migrations
    npm run dev
    ```
 
-5. Visit `http://localhost:3000`, sign up, and connect a Sleeper account by
-   username on the dashboard — no API key needed, Sleeper's read API is
-   public.
+5. Visit `http://localhost:3000`, sign up, and connect a league from the
+   dashboard:
+   - **Sleeper**: just a username — no API key needed, Sleeper's read API is
+     public.
+   - **ESPN**: a league ID and season. Public leagues need nothing else;
+     private leagues (the default for most) also need the `espn_s2` and
+     `SWID` cookies from a logged-in espn.com session — instructions are in
+     the connect form itself.
 
 ## Database commands
 
@@ -83,8 +90,10 @@ drizzle/                          Generated SQL migrations
 - `user` / `account` / `session` / `verificationToken` — Auth.js's standard
   adapter tables (`user` also has a `passwordHash` column for credentials
   login).
-- `platform_identities` — links a user to their account on a given platform
-  (e.g. their Sleeper `user_id`).
+- `platform_identities` — links a user to their account on a given platform:
+  their Sleeper `user_id`, or for ESPN, their `SWID` plus an encrypted copy
+  of their `espn_s2` cookie (only stored when a private league is
+  connected).
 - `connected_leagues` — one row per league a user has imported, tagged by
   platform, season, and league id.
 
@@ -96,3 +105,17 @@ drizzle/                          Generated SQL migrations
   state.
 - The full player dictionary (`/players/nfl`) is ~5MB and Sleeper asks that
   it not be polled frequently, so it's fetched with a 12-hour cache.
+
+## Notes on the ESPN integration
+
+- Uses the [`espn-fantasy-football-api`](https://www.npmjs.com/package/espn-fantasy-football-api)
+  package (`src/lib/espn/client.ts`), which wraps ESPN's undocumented v3
+  fantasy API.
+- Public leagues resolve with just a league ID and season. Most leagues are
+  private by default, though, which requires the `espn_s2` and `SWID`
+  cookies from a browser session logged into espn.com — there's no OAuth
+  flow, ESPN's fantasy API doesn't offer one.
+- `espn_s2` is encrypted with AES-256-GCM (key derived from `AUTH_SECRET`,
+  see `src/lib/crypto/secrets.ts`) before being written to
+  `platform_identities.encryptedSecret`. It's currently stored for future
+  use (refreshing rosters/matchups) but nothing reads it back yet.

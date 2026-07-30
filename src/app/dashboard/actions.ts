@@ -5,6 +5,8 @@ import { revalidatePath } from "next/cache";
 import { auth } from "@/auth";
 import { db } from "@/db/client";
 import { connectedLeagues, platformIdentities } from "@/db/schema";
+import { encryptSecret } from "@/lib/crypto/secrets";
+import { EspnApiError, getEspnLeagueInfo } from "@/lib/espn/client";
 import {
   getSleeperLeaguesForUser,
   getSleeperNflState,
@@ -96,6 +98,102 @@ export async function connectSleeperAccount(
     error: null,
     success: `Imported ${leagues.length} league${leagues.length === 1 ? "" : "s"} for ${sleeperUser.display_name}.`,
   };
+}
+
+export type ConnectEspnState = {
+  error: string | null;
+  success: string | null;
+};
+
+export async function connectEspnAccount(
+  _prevState: ConnectEspnState,
+  formData: FormData,
+): Promise<ConnectEspnState> {
+  const leagueIdRaw = String(formData.get("leagueId") ?? "").trim();
+  const seasonRaw = String(formData.get("season") ?? "").trim();
+  const espnS2 = String(formData.get("espnS2") ?? "").trim();
+  const swid = String(formData.get("swid") ?? "").trim();
+
+  const leagueId = Number(leagueIdRaw);
+  const season = Number(seasonRaw);
+
+  if (!leagueIdRaw || !Number.isInteger(leagueId) || leagueId <= 0) {
+    return { error: "Enter a valid ESPN league ID.", success: null };
+  }
+  if (!seasonRaw || !Number.isInteger(season)) {
+    return { error: "Enter a valid season year.", success: null };
+  }
+  if ((espnS2 && !swid) || (!espnS2 && swid)) {
+    return {
+      error: "Enter both the espn_s2 and SWID cookies, or leave both blank.",
+      success: null,
+    };
+  }
+
+  const session = await auth();
+  if (!session?.user) return { error: "You must be logged in.", success: null };
+  const userId = session.user.id;
+
+  let league;
+  try {
+    league = await getEspnLeagueInfo({
+      leagueId,
+      seasonId: season,
+      espnS2: espnS2 || undefined,
+      swid: swid || undefined,
+    });
+  } catch (err) {
+    if (err instanceof EspnApiError) {
+      return { error: err.message, success: null };
+    }
+    throw err;
+  }
+
+  if (swid && espnS2) {
+    await db
+      .insert(platformIdentities)
+      .values({
+        userId,
+        platform: "espn",
+        platformUserId: swid,
+        encryptedSecret: encryptSecret(espnS2),
+      })
+      .onConflictDoUpdate({
+        target: [
+          platformIdentities.userId,
+          platformIdentities.platform,
+          platformIdentities.platformUserId,
+        ],
+        set: { encryptedSecret: encryptSecret(espnS2) },
+      });
+  }
+
+  await db
+    .insert(connectedLeagues)
+    .values({
+      userId,
+      platform: "espn",
+      platformLeagueId: String(leagueId),
+      platformUserId: swid || null,
+      leagueName: league.name,
+      season: String(season),
+      sport: "nfl",
+    })
+    .onConflictDoUpdate({
+      target: [
+        connectedLeagues.userId,
+        connectedLeagues.platform,
+        connectedLeagues.platformLeagueId,
+      ],
+      set: {
+        leagueName: league.name,
+        season: String(season),
+        platformUserId: swid || null,
+      },
+    });
+
+  revalidatePath("/dashboard");
+  return { error: null, success: `Imported "${league.name}".` };
 }
 
 export async function removeConnectedLeague(leagueRowId: string) {
