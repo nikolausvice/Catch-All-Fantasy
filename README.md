@@ -1,4 +1,4 @@
-# Gridiron Ledger
+# Catch All Fantasy
 
 Connect fantasy football leagues from Sleeper, ESPN, and Yahoo, and compare
 your rosters across all of them — e.g. if you have Patrick Mahomes on one
@@ -78,7 +78,7 @@ drizzle/                          Generated SQL migrations
 
 ## Deploying
 
-- **Turso**: create a database (`turso db create gridiron-ledger`), get its
+- **Turso**: create a database (`turso db create catch-all-fantasy`), get its
   URL and an auth token, and set `TURSO_DATABASE_URL` / `TURSO_AUTH_TOKEN`.
   Run `npm run db:migrate` once against those prod env vars to create the
   tables.

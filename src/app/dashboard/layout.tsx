@@ -19,7 +19,7 @@ export default async function DashboardLayout({
       <header className="border-b border-border">
         <div className="mx-auto flex max-w-5xl items-center justify-between px-4 py-4">
           <Link href="/dashboard" className="font-semibold tracking-tight">
-            Gridiron Ledger
+            Catch All Fantasy
           </Link>
           <div className="flex items-center gap-3">
             <span className="hidden text-sm text-muted-foreground sm:inline">

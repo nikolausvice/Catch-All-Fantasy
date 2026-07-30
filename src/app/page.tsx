@@ -7,7 +7,7 @@ export default function Home() {
       <header className="border-b border-border">
         <div className="mx-auto flex max-w-5xl items-center justify-between px-4 py-4">
           <span className="font-semibold tracking-tight">
-            Gridiron Ledger
+            Catch All Fantasy
           </span>
           <div className="flex items-center gap-3">
             <ThemeToggle />

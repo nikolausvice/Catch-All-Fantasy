@@ -14,7 +14,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Gridiron Ledger",
+  title: "Catch All Fantasy",
   description:
     "Connect your Sleeper, ESPN, and Yahoo fantasy football leagues and see exactly what every player needs to do to win across all of them at once.",
 };
