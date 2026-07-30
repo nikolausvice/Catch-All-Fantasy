@@ -15,6 +15,13 @@
       "when": 1785447873828,
       "tag": "0001_steady_husk",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1785448658423,
+      "tag": "0002_young_devos",
+      "breakpoints": true
     }
   ]
 }

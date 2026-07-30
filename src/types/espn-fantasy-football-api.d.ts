@@ -15,9 +15,32 @@ declare module "espn-fantasy-football-api/node" {
     currentScoringPeriodId: number;
   }
 
+  interface EspnPlayer {
+    id: number;
+    fullName: string;
+    proTeamAbbreviation: string | null;
+    defaultPosition: string | null;
+  }
+
+  interface EspnTeam {
+    id: number;
+    name: string;
+    abbreviation: string;
+    ownerName: string;
+    logoURL: string | null;
+    roster: EspnPlayer[];
+    wins: number;
+    losses: number;
+    ties: number;
+  }
+
   export class Client {
     constructor(options: ClientOptions);
     setCookies(cookies: { espnS2: string; SWID: string }): void;
     getLeagueInfo(options: { seasonId: number }): Promise<LeagueInfo>;
+    getTeamsAtWeek(options: {
+      seasonId: number;
+      scoringPeriodId: number;
+    }): Promise<EspnTeam[]>;
   }
 }

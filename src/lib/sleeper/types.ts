@@ -3,6 +3,10 @@ export interface SleeperUser {
   username: string;
   display_name: string;
   avatar: string | null;
+  /** Only present on /league/{id}/users, not the standalone user lookup. */
+  metadata?: {
+    team_name?: string;
+  } | null;
 }
 
 export interface SleeperLeague {

@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { desc, eq } from "drizzle-orm";
 import { auth } from "@/auth";
 import { db } from "@/db/client";
@@ -69,29 +70,34 @@ export default async function DashboardPage() {
         ) : (
           <ul className="grid gap-3 sm:grid-cols-2">
             {leagues.map((league) => (
-              <li
-                key={league.id}
-                className="flex items-center gap-3 rounded-xl border border-border bg-card p-4"
-              >
-                {league.avatarUrl ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={league.avatarUrl}
-                    alt=""
-                    className="size-10 rounded-md"
-                  />
-                ) : (
-                  <div className="flex size-10 items-center justify-center rounded-md bg-muted text-xs font-medium text-muted-foreground">
-                    {PLATFORM_LABEL[league.platform]?.[0] ?? "?"}
+              <li key={league.id}>
+                <Link
+                  href={`/dashboard/leagues/${league.id}`}
+                  className="flex items-center gap-3 rounded-xl border border-border bg-card p-4 transition-colors hover:bg-muted"
+                >
+                  {league.avatarUrl ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={league.avatarUrl}
+                      alt=""
+                      className="size-10 rounded-md"
+                    />
+                  ) : (
+                    <div className="flex size-10 items-center justify-center rounded-md bg-muted text-xs font-medium text-muted-foreground">
+                      {PLATFORM_LABEL[league.platform]?.[0] ?? "?"}
+                    </div>
+                  )}
+                  <div className="min-w-0">
+                    <p className="truncate font-medium">{league.leagueName}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {PLATFORM_LABEL[league.platform] ?? league.platform} ·{" "}
+                      {league.season}
+                      {league.userTeamName
+                        ? ` · Your team: ${league.userTeamName}`
+                        : ""}
+                    </p>
                   </div>
-                )}
-                <div className="min-w-0">
-                  <p className="truncate font-medium">{league.leagueName}</p>
-                  <p className="text-xs text-muted-foreground">
-                    {PLATFORM_LABEL[league.platform] ?? league.platform} ·{" "}
-                    {league.season}
-                  </p>
-                </div>
+                </Link>
               </li>
             ))}
           </ul>

@@ -49,61 +49,68 @@ export function ConnectEspnForm() {
             className="rounded-md border border-border bg-background px-3 py-2 text-sm outline-none ring-ring focus:ring-2"
           />
         </div>
-        <div className="flex flex-col gap-1.5">
-          <label htmlFor="espn-s2" className="text-sm font-medium">
-            espn_s2 cookie{" "}
-            <span className="font-normal text-muted-foreground">
-              (private leagues)
-            </span>
-          </label>
-          <input
-            id="espn-s2"
-            name="espnS2"
-            type="password"
-            autoComplete="off"
-            value={espnS2}
-            onChange={(e) => setEspnS2(e.target.value)}
-            className="rounded-md border border-border bg-background px-3 py-2 text-sm outline-none ring-ring focus:ring-2"
-          />
-        </div>
-        <div className="flex flex-col gap-1.5">
-          <label htmlFor="espn-swid" className="text-sm font-medium">
-            SWID cookie
-          </label>
-          <input
-            id="espn-swid"
-            name="swid"
-            type="password"
-            autoComplete="off"
-            value={swid}
-            onChange={(e) => setSwid(e.target.value)}
-            placeholder="{XXXXXXXX-XXXX-...}"
-            className="rounded-md border border-border bg-background px-3 py-2 text-sm outline-none ring-ring focus:ring-2"
-          />
-        </div>
       </div>
 
-      <details className="text-sm text-muted-foreground">
-        <summary className="cursor-pointer select-none hover:text-foreground">
-          Where do I find these cookies?
-        </summary>
-        <p className="mt-2">
-          Log into{" "}
-          <a
-            href="https://www.espn.com/fantasy/football/"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-primary hover:underline"
-          >
-            espn.com
-          </a>
-          , open DevTools (F12) → Application → Cookies →
-          espn.com, and copy the values of <code>espn_s2</code> and{" "}
-          <code>SWID</code>. Only needed for private leagues — public leagues
-          work with just a League ID and season. Cookies are encrypted
-          before being stored.
+      <fieldset className="rounded-lg border border-dashed border-border p-3">
+        <legend className="px-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+          Private leagues only
+        </legend>
+        <p className="mb-3 text-xs text-muted-foreground">
+          Skip these two fields if your league is public. Most leagues are
+          private by default, so you&apos;ll usually need them.
         </p>
-      </details>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <div className="flex flex-col gap-1.5">
+            <label htmlFor="espn-s2" className="text-sm font-medium">
+              espn_s2 cookie
+            </label>
+            <input
+              id="espn-s2"
+              name="espnS2"
+              type="password"
+              autoComplete="off"
+              value={espnS2}
+              onChange={(e) => setEspnS2(e.target.value)}
+              className="rounded-md border border-border bg-background px-3 py-2 text-sm outline-none ring-ring focus:ring-2"
+            />
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <label htmlFor="espn-swid" className="text-sm font-medium">
+              SWID cookie
+            </label>
+            <input
+              id="espn-swid"
+              name="swid"
+              type="password"
+              autoComplete="off"
+              value={swid}
+              onChange={(e) => setSwid(e.target.value)}
+              placeholder="{XXXXXXXX-XXXX-...}"
+              className="rounded-md border border-border bg-background px-3 py-2 text-sm outline-none ring-ring focus:ring-2"
+            />
+          </div>
+        </div>
+
+        <details className="mt-3 text-sm text-muted-foreground">
+          <summary className="cursor-pointer select-none hover:text-foreground">
+            Where do I find these cookies?
+          </summary>
+          <p className="mt-2">
+            Log into{" "}
+            <a
+              href="https://www.espn.com/fantasy/football/"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-primary hover:underline"
+            >
+              espn.com
+            </a>
+            , open DevTools (F12) → Application → Cookies →
+            espn.com, and copy the values of <code>espn_s2</code> and{" "}
+            <code>SWID</code>. Cookies are encrypted before being stored.
+          </p>
+        </details>
+      </fieldset>
 
       <button
         type="submit"

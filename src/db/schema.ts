@@ -109,6 +109,10 @@ export const connectedLeagues = sqliteTable(
     season: text("season").notNull(),
     sport: text("sport").notNull().default("nfl"),
     avatarUrl: text("avatarUrl"),
+    /** Platform-specific id of the team/roster the user identified as their own. */
+    userTeamId: text("userTeamId"),
+    /** Denormalized so the dashboard can show it without refetching from the platform. */
+    userTeamName: text("userTeamName"),
     createdAt: integer("createdAt", { mode: "timestamp_ms" })
       .notNull()
       .$defaultFn(() => new Date()),
