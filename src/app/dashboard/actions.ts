@@ -7,6 +7,7 @@ import { db } from "@/db/client";
 import { connectedLeagues, platformIdentities } from "@/db/schema";
 import { encryptSecret } from "@/lib/crypto/secrets";
 import { EspnApiError, getEspnLeagueInfo } from "@/lib/espn/client";
+import { requireSessionUserId, STALE_SESSION_MESSAGE } from "@/lib/auth/require-user";
 import {
   getSleeperLeaguesForUser,
   getSleeperNflState,
@@ -26,9 +27,8 @@ export async function connectSleeperAccount(
   const username = String(formData.get("username") ?? "").trim();
   if (!username) return { error: "Enter a Sleeper username.", success: null };
 
-  const session = await auth();
-  if (!session?.user) return { error: "You must be logged in.", success: null };
-  const userId = session.user.id;
+  const userId = await requireSessionUserId();
+  if (!userId) return { error: STALE_SESSION_MESSAGE, success: null };
 
   const sleeperUser = await getSleeperUserByUsername(username);
   if (!sleeperUser) {
@@ -130,9 +130,8 @@ export async function connectEspnAccount(
     };
   }
 
-  const session = await auth();
-  if (!session?.user) return { error: "You must be logged in.", success: null };
-  const userId = session.user.id;
+  const userId = await requireSessionUserId();
+  if (!userId) return { error: STALE_SESSION_MESSAGE, success: null };
 
   let league;
   try {

@@ -2,6 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { auth } from "@/auth";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { requireSessionUserId } from "@/lib/auth/require-user";
 import { signOut } from "../(auth)/actions";
 
 export default async function DashboardLayout({
@@ -10,9 +11,15 @@ export default async function DashboardLayout({
   children: React.ReactNode;
 }) {
   const session = await auth();
-  const user = session?.user;
+  if (!session?.user) redirect("/login");
 
-  if (!user) redirect("/login");
+  // A session's JWT can outlive the user row it points to (e.g. the DB was
+  // reset). Catch that here rather than letting every page/action underneath
+  // hit a foreign-key crash on first write.
+  const userId = await requireSessionUserId();
+  if (!userId) redirect("/login");
+
+  const user = session.user;
 
   return (
     <div className="flex min-h-screen flex-col">
