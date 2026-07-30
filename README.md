@@ -5,7 +5,7 @@ your rosters across all of them — e.g. if you have Patrick Mahomes on one
 team and are playing against him on another, see exactly what score keeps
 you optimal in both matchups.
 
-This is the initial setup: Next.js app, Supabase auth/database, and a
+This is the initial setup: Next.js app, self-hosted auth + database, and a
 working Sleeper integration. ESPN and Yahoo, plus the cross-league matchup
 comparison itself, come next.
 
@@ -13,34 +13,49 @@ comparison itself, come next.
 
 - **Next.js 16** (App Router, TypeScript, Turbopack) — frontend + backend
 - **Tailwind CSS v4** — CSS-first config, no `tailwind.config.js`
-- **Supabase** — Postgres database + auth (email/password to start)
+- **Auth.js v5** (`next-auth`) — email/password (Credentials provider), JWT sessions
+- **SQLite via libSQL + Drizzle ORM** — same client/schema locally and in prod:
+  a local file (`local.db`) in dev, [Turso](https://turso.tech) in prod
 - **next-themes** — light/dark mode
 - **Vercel** — target deployment platform
 
 ## Project layout
 
 ```
-proxy.ts                        Session-refresh proxy (Next 16's renamed middleware)
+src/proxy.ts                     Route-protection proxy (Next 16's renamed middleware)
 src/app/page.tsx                 Landing page
 src/app/(auth)/                  Login / signup pages + server actions
-src/app/auth/callback/route.ts   Supabase email-confirmation / OAuth callback
+src/app/api/auth/[...nextauth]/  Auth.js route handler
 src/app/dashboard/                Authenticated area: connect leagues, list them
-src/lib/supabase/                Browser client, server client, proxy helper
+src/auth.ts                       Auth.js config (Credentials provider, Drizzle adapter)
+src/db/schema.ts                  Drizzle schema: auth tables + platform_identities/connected_leagues
+src/db/client.ts                  libSQL client (local file or Turso, same code path)
 src/lib/sleeper/                 Sleeper API client + types
-src/types/database.ts            Supabase table types (placeholder, regenerate via CLI)
-supabase/migrations/0001_init.sql Initial schema: platform_identities, connected_leagues
+drizzle/                          Generated SQL migrations
 ```
 
 ## Getting started
 
-1. Create a Supabase project at [supabase.com](https://supabase.com).
-2. In the Supabase SQL editor, run [`supabase/migrations/0001_init.sql`](supabase/migrations/0001_init.sql).
-3. Copy `.env.example` to `.env.local` and fill in your Supabase project URL
-   and anon key (Project Settings → API).
-4. Install dependencies and run the dev server:
+1. Install dependencies:
 
    ```bash
    npm install
+   ```
+
+2. Copy `.env.example` to `.env.local` and set `AUTH_SECRET` (generate one
+   with `node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"`).
+   Leave `TURSO_DATABASE_URL`/`TURSO_AUTH_TOKEN` blank for local dev — a
+   `local.db` SQLite file is created automatically.
+
+3. Create the database tables:
+
+   ```bash
+   npm run db:migrate
+   ```
+
+4. Run the dev server:
+
+   ```bash
    npm run dev
    ```
 
@@ -48,21 +63,30 @@ supabase/migrations/0001_init.sql Initial schema: platform_identities, connected
    username on the dashboard — no API key needed, Sleeper's read API is
    public.
 
+## Database commands
+
+- `npm run db:generate` — generate a new SQL migration after editing `src/db/schema.ts`
+- `npm run db:migrate` — apply migrations to whichever DB the env vars point at
+- `npm run db:studio` — open Drizzle Studio to browse data
+
 ## Deploying
 
-- **Vercel**: import the repo, set the same env vars from `.env.example` in
-  the project settings, deploy. `NEXT_PUBLIC_SITE_URL` should be your
-  production URL (used for the email-confirmation redirect).
-- **Supabase**: in Authentication → URL Configuration, add your production
-  URL and `https://<your-domain>/auth/callback` as an allowed redirect URL.
+- **Turso**: create a database (`turso db create gridiron-ledger`), get its
+  URL and an auth token, and set `TURSO_DATABASE_URL` / `TURSO_AUTH_TOKEN`.
+  Run `npm run db:migrate` once against those prod env vars to create the
+  tables.
+- **Vercel**: import the repo, set `AUTH_SECRET`, `TURSO_DATABASE_URL`, and
+  `TURSO_AUTH_TOKEN` in the project settings, deploy.
 
 ## Data model so far
 
-- `platform_identities` — links a Supabase user to their account on a given
-  platform (e.g. their Sleeper `user_id`).
+- `user` / `account` / `session` / `verificationToken` — Auth.js's standard
+  adapter tables (`user` also has a `passwordHash` column for credentials
+  login).
+- `platform_identities` — links a user to their account on a given platform
+  (e.g. their Sleeper `user_id`).
 - `connected_leagues` — one row per league a user has imported, tagged by
-  platform, season, and league id. Both tables are RLS-protected so a user
-  can only see their own rows.
+  platform, season, and league id.
 
 ## Notes on the Sleeper integration
 

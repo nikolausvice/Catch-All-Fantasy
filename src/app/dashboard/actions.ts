@@ -1,7 +1,10 @@
 "use server";
 
+import { and, eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
-import { createClient } from "@/lib/supabase/server";
+import { auth } from "@/auth";
+import { db } from "@/db/client";
+import { connectedLeagues, platformIdentities } from "@/db/schema";
 import {
   getSleeperLeaguesForUser,
   getSleeperNflState,
@@ -9,7 +12,10 @@ import {
   sleeperAvatarUrl,
 } from "@/lib/sleeper/client";
 
-export type ConnectSleeperState = { error: string | null; success: string | null };
+export type ConnectSleeperState = {
+  error: string | null;
+  success: string | null;
+};
 
 export async function connectSleeperAccount(
   _prevState: ConnectSleeperState,
@@ -18,34 +24,36 @@ export async function connectSleeperAccount(
   const username = String(formData.get("username") ?? "").trim();
   if (!username) return { error: "Enter a Sleeper username.", success: null };
 
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return { error: "You must be logged in.", success: null };
+  const session = await auth();
+  if (!session?.user) return { error: "You must be logged in.", success: null };
+  const userId = session.user.id;
 
   const sleeperUser = await getSleeperUserByUsername(username);
   if (!sleeperUser) {
-    return { error: `No Sleeper user found for "${username}".`, success: null };
+    return {
+      error: `No Sleeper user found for "${username}".`,
+      success: null,
+    };
   }
 
   const { season } = await getSleeperNflState();
 
-  const { error: identityError } = await supabase
-    .from("platform_identities")
-    .upsert(
-      {
-        user_id: user.id,
-        platform: "sleeper",
-        platform_user_id: sleeperUser.user_id,
-        platform_username: sleeperUser.username,
-      },
-      { onConflict: "user_id,platform,platform_user_id" },
-    );
-
-  if (identityError) {
-    return { error: identityError.message, success: null };
-  }
+  await db
+    .insert(platformIdentities)
+    .values({
+      userId,
+      platform: "sleeper",
+      platformUserId: sleeperUser.user_id,
+      platformUsername: sleeperUser.username,
+    })
+    .onConflictDoUpdate({
+      target: [
+        platformIdentities.userId,
+        platformIdentities.platform,
+        platformIdentities.platformUserId,
+      ],
+      set: { platformUsername: sleeperUser.username },
+    });
 
   const leagues = await getSleeperLeaguesForUser(sleeperUser.user_id, season);
 
@@ -56,23 +64,31 @@ export async function connectSleeperAccount(
     };
   }
 
-  const rows = leagues.map((league) => ({
-    user_id: user.id,
-    platform: "sleeper" as const,
-    platform_league_id: league.league_id,
-    platform_user_id: sleeperUser.user_id,
-    league_name: league.name,
-    season: league.season,
-    sport: league.sport,
-    avatar_url: sleeperAvatarUrl(league.avatar),
-  }));
-
-  const { error: leaguesError } = await supabase
-    .from("connected_leagues")
-    .upsert(rows, { onConflict: "user_id,platform,platform_league_id" });
-
-  if (leaguesError) {
-    return { error: leaguesError.message, success: null };
+  for (const league of leagues) {
+    await db
+      .insert(connectedLeagues)
+      .values({
+        userId,
+        platform: "sleeper",
+        platformLeagueId: league.league_id,
+        platformUserId: sleeperUser.user_id,
+        leagueName: league.name,
+        season: league.season,
+        sport: league.sport,
+        avatarUrl: sleeperAvatarUrl(league.avatar),
+      })
+      .onConflictDoUpdate({
+        target: [
+          connectedLeagues.userId,
+          connectedLeagues.platform,
+          connectedLeagues.platformLeagueId,
+        ],
+        set: {
+          leagueName: league.name,
+          season: league.season,
+          avatarUrl: sleeperAvatarUrl(league.avatar),
+        },
+      });
   }
 
   revalidatePath("/dashboard");
@@ -83,7 +99,16 @@ export async function connectSleeperAccount(
 }
 
 export async function removeConnectedLeague(leagueRowId: string) {
-  const supabase = await createClient();
-  await supabase.from("connected_leagues").delete().eq("id", leagueRowId);
+  const session = await auth();
+  if (!session?.user) return;
+
+  await db
+    .delete(connectedLeagues)
+    .where(
+      and(
+        eq(connectedLeagues.id, leagueRowId),
+        eq(connectedLeagues.userId, session.user.id),
+      ),
+    );
   revalidatePath("/dashboard");
 }
