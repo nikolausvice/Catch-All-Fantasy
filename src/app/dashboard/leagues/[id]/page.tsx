@@ -11,6 +11,7 @@ import { computeMatchupWinProb } from "@/lib/leagues/cross-league";
 import { getCurrentNflWeek } from "@/lib/leagues/week";
 import { SleeperApiError } from "@/lib/sleeper/client";
 import { AvatarImage } from "@/components/avatar-image";
+import { RemoveLeagueButton } from "@/components/remove-league-button";
 import type { LeagueMatchup, LeagueTeam, LeagueTeamPlayer } from "@/lib/leagues/types";
 
 const PLATFORM_LABEL: Record<string, string> = {
@@ -113,62 +114,6 @@ const SLOT_DISPLAY: Record<string, string> = {
 
 function slotLabel(slot: string): string {
   return SLOT_DISPLAY[slot] ?? slot;
-}
-
-function PlayerList({
-  players,
-  title,
-}: {
-  players: LeagueTeamPlayer[];
-  title: string;
-}) {
-  if (players.length === 0) return null;
-  return (
-    <div>
-      <p className="mb-1 text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
-        {title}
-      </p>
-      <ul className="flex flex-col">
-        {players.map((player) => (
-          <li
-            key={player.id}
-            className="flex items-center gap-2 border-b border-border/50 py-1.5 text-sm last:border-0"
-          >
-            {player.slot && (
-              <span className="w-10 shrink-0 text-[11px] font-semibold uppercase text-muted-foreground">
-                {slotLabel(player.slot)}
-              </span>
-            )}
-            <span className="min-w-0 flex-1 truncate">{player.name}</span>
-            <span className="shrink-0 text-xs text-muted-foreground">
-              {[player.position, player.proTeam].filter(Boolean).join(" · ")}
-            </span>
-            {player.points !== undefined && (
-              <span className="w-9 shrink-0 text-right text-xs font-semibold tabular-nums">
-                {player.points.toFixed(1)}
-              </span>
-            )}
-          </li>
-        ))}
-      </ul>
-    </div>
-  );
-}
-
-function RosterPanel({ team }: { team: LeagueTeam }) {
-  const starters = team.players.filter((p) => p.isStarter);
-  const bench = team.players.filter((p) => !p.isStarter);
-
-  if (starters.length === 0) {
-    return <PlayerList players={bench} title="Players" />;
-  }
-
-  return (
-    <div className="flex flex-col gap-5">
-      <PlayerList players={starters} title="Starters" />
-      <PlayerList players={bench} title="Bench" />
-    </div>
-  );
 }
 
 interface RosterRow {
@@ -355,6 +300,7 @@ export default async function LeagueDetailPage({
             >
               Switch team
             </Link>
+            <RemoveLeagueButton leagueRowId={id} leagueName={league.leagueName} />
           </div>
         </div>
       </div>
@@ -467,15 +413,23 @@ export default async function LeagueDetailPage({
             </div>
           )}
 
-          {/* Roster */}
-          {matchup.opponent ? (
-            <MirroredRoster team={matchup.team} opponent={matchup.opponent} />
-          ) : (
-            <div className="rounded-xl border border-border bg-card p-4">
-              <h2 className="mb-4 text-sm font-semibold">Your lineup</h2>
-              <RosterPanel team={matchup.team} />
-            </div>
-          )}
+          {/* Roster — bye weeks reuse the same mirrored layout with an empty
+              opponent side, rather than a different single-panel view, so
+              the page doesn't visually reshuffle just because of a bye. */}
+          <MirroredRoster
+            team={matchup.team}
+            opponent={
+              matchup.opponent ?? {
+                id: "",
+                name: "Bye",
+                avatarUrl: null,
+                wins: 0,
+                losses: 0,
+                ties: 0,
+                players: [],
+              }
+            }
+          />
         </>
       )}
     </div>

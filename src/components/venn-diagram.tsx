@@ -4,252 +4,172 @@ import { useState } from "react";
 
 export interface VennSetInfo {
   leagueId: string;
-  leagueName: string;
+  /** Display label — the relevant team's name (yours, or that week's opponent), not the league name. */
+  label: string;
   size: number;
+  side: "own" | "opponent";
 }
 
 export interface VennComboInfo {
   leagueIds: string[];
-  players: { id: string; name: string; position: string | null }[];
+  players: {
+    id: string;
+    name: string;
+    position: string | null;
+    proTeam: string | null;
+    /** Plain informational projection (the higher of the contexts this player appears in) — not signed. */
+    projectedPoints: number;
+    /** Own-side contexts add, opponent-side subtract — a player on two opposing rosters compounds. */
+    netValue: number;
+  }[];
 }
 
-// Fixed categorical order — never reassigned by rank/filter.
-const OWN_COLORS = [
-  "#3b82f6", // blue-500
-  "#10b981", // emerald-500
-  "#f59e0b", // amber-500
-  "#8b5cf6", // violet-500
-  "#ec4899", // pink-500
-  "#06b6d4", // cyan-500
-  "#84cc16", // lime-500
-  "#f97316", // orange-500
-  "#6366f1", // indigo-500
-  "#14b8a6", // teal-500
-];
+type Side = "own" | "opponent" | "mix";
 
-// Fixed red/warm order for the opponents view — visually distinct from
-// "your teams" so it always reads as "the other side."
-const OPPONENT_COLORS = [
-  "#ef4444", // red-500
-  "#f97316", // orange-500
-  "#e11d48", // rose-600
-  "#dc2626", // red-600
-  "#f43f5e", // rose-500
-  "#c2410c", // orange-700
-  "#b91c1c", // red-700
-  "#fb7185", // rose-400
-  "#9f1239", // rose-800
-  "#7c2d12", // orange-900
-];
+const SIDE_COLOR: Record<Side, string> = {
+  own: "#22c55e", // green-500
+  opponent: "#ef4444", // red-500
+  mix: "#f59e0b", // amber-500
+};
+const GREY_COLOR = "#9ca3af"; // gray-400 — no overlap, or filtered out of the current selection
 
-function comboKey(leagueIds: string[]): string {
-  return [...leagueIds].sort().join("|");
+const SIDE_TEXT_CLASS: Record<Side, string> = {
+  own: "text-emerald-600 dark:text-emerald-400",
+  opponent: "text-red-600 dark:text-red-400",
+  mix: "text-amber-600 dark:text-amber-400",
+};
+
+function comboSide(sideById: Map<string, "own" | "opponent">, leagueIds: string[]): Side {
+  const sides = new Set(leagueIds.map((id) => sideById.get(id)));
+  if (sides.has("own") && sides.has("opponent")) return "mix";
+  return sides.has("own") ? "own" : "opponent";
 }
 
-function PlayerPanel({
-  title,
-  players,
-}: {
-  title: string;
-  players: { id: string; name: string; position: string | null }[];
-}) {
-  return (
-    <div className="rounded-xl border border-border bg-card p-4">
-      <p className="mb-3 text-sm font-semibold">{title}</p>
-      {players.length === 0 ? (
-        <p className="text-xs text-muted-foreground">No players in this group.</p>
-      ) : (
-        <div className="flex flex-wrap gap-1.5">
-          {players.map((p) => (
-            <span
-              key={p.id}
-              className="rounded-full border border-border bg-muted/50 px-2.5 py-1 text-xs font-medium"
-            >
-              {p.name}
-              {p.position && (
-                <span className="ml-1 text-muted-foreground">{p.position}</span>
-              )}
-            </span>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
+export function VennExplorer({ sets, combos }: { sets: VennSetInfo[]; combos: VennComboInfo[] }) {
+  const [selected, setSelected] = useState<string[]>([]);
 
-// ── Overlap matrix (UpSet-style — works for any number of leagues) ────────
+  const sideById = new Map(sets.map((s) => [s.leagueId, s.side]));
+  const overlapCombos = combos.filter((c) => c.leagueIds.length >= 2);
 
-function OverlapMatrix({
-  sets,
-  combos,
-  colors,
-}: {
-  sets: VennSetInfo[];
-  combos: VennComboInfo[];
-  colors: string[];
-}) {
-  const [selectedKey, setSelectedKey] = useState<string | null>(null);
-  const TOP_N = 15;
-  const shown = combos.slice(0, TOP_N);
-  const maxCount = Math.max(1, ...shown.map((c) => c.players.length));
-  // Derived fresh from the current `combos` prop (rather than stored as
-  // state) so switching perspective updates the shown players immediately,
-  // instead of freezing on whatever was selected before the switch.
-  const selectedCombo = selectedKey
-    ? (combos.find((c) => comboKey(c.leagueIds) === selectedKey) ?? null)
-    : null;
+  if (overlapCombos.length === 0) {
+    return (
+      <p className="rounded-xl border border-dashed border-border p-8 text-center text-sm text-muted-foreground">
+        No overlapping players yet — connect more leagues, or check back once matchups are set.
+      </p>
+    );
+  }
+
+  // Teams that appear in at least one overlap anywhere — everything else is
+  // a permanently dead end and gets greyed out from the start.
+  const teamsWithOverlap = new Set(overlapCombos.flatMap((c) => c.leagueIds));
+
+  function matches(selection: string[], leagueIds: string[]): boolean {
+    return selection.every((id) => leagueIds.includes(id));
+  }
+
+  const matchingCombos =
+    selected.length === 0 ? [] : overlapCombos.filter((c) => matches(selected, c.leagueIds));
+  const matchingPlayerIds = new Set(matchingCombos.flatMap((c) => c.players.map((p) => p.id)));
+
+  // Would adding this candidate to the current selection still hit at least
+  // one real combo? Used to grey out non-viable "next clicks" so the user is
+  // steered toward selections that actually go somewhere.
+  function isViableNext(leagueId: string): boolean {
+    if (selected.includes(leagueId)) return true;
+    const next = [...selected, leagueId];
+    return overlapCombos.some((c) => matches(next, c.leagueIds));
+  }
+
+  function toggle(leagueId: string) {
+    if (!teamsWithOverlap.has(leagueId)) return;
+    setSelected((prev) =>
+      prev.includes(leagueId) ? prev.filter((id) => id !== leagueId) : [...prev, leagueId],
+    );
+  }
+
+  const seen = new Set<string>();
+  const entries: (VennComboInfo["players"][number] & { side: Side; leagueIds: string[] })[] = [];
+  for (const combo of overlapCombos) {
+    const side = comboSide(sideById, combo.leagueIds);
+    for (const p of combo.players) {
+      if (seen.has(p.id)) continue;
+      seen.add(p.id);
+      entries.push({ ...p, side, leagueIds: combo.leagueIds });
+    }
+  }
+
+  // Highest net value to lowest by default; once a selection is active,
+  // matching entries bubble to the top (still ordered by net value within
+  // each group) instead of just losing their color in place.
+  const sorted = entries.slice().sort((a, b) => {
+    const aMatch = selected.length === 0 || matchingPlayerIds.has(a.id) ? 1 : 0;
+    const bMatch = selected.length === 0 || matchingPlayerIds.has(b.id) ? 1 : 0;
+    if (aMatch !== bMatch) return bMatch - aMatch;
+    return b.netValue - a.netValue;
+  });
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex flex-wrap gap-4 text-xs">
-        {sets.map((s, i) => (
-          <span key={s.leagueId} className="flex items-center gap-1.5">
-            <span
-              className="inline-block size-2.5 rounded-full"
-              style={{ backgroundColor: colors[i % colors.length] }}
-            />
-            {s.leagueName} ({s.size})
-          </span>
-        ))}
-      </div>
+      <div className="grid grid-cols-[repeat(auto-fill,minmax(6.5rem,1fr))] gap-2">
+        {sets.map((s) => {
+          const hasOverlap = teamsWithOverlap.has(s.leagueId);
+          const isSelected = selected.includes(s.leagueId);
+          const viable = hasOverlap && (isSelected || isViableNext(s.leagueId));
+          const color = hasOverlap ? SIDE_COLOR[s.side] : GREY_COLOR;
 
-      <div className="flex flex-col gap-1.5">
-        {shown.map((combo) => {
-          const key = comboKey(combo.leagueIds);
-          const isOpen = key === selectedKey;
           return (
             <button
-              key={key}
+              key={s.leagueId}
               type="button"
-              onClick={() => setSelectedKey(isOpen ? null : key)}
-              className={`flex items-center gap-3 rounded-lg border px-3 py-2 text-left transition-colors ${
-                isOpen ? "border-primary bg-muted" : "border-border bg-card hover:bg-muted"
+              disabled={!hasOverlap}
+              onClick={() => toggle(s.leagueId)}
+              title={!hasOverlap ? `${s.label} — no overlap with any other team` : s.label}
+              className={`flex min-h-11 items-center justify-center rounded-lg border-2 px-2 py-1.5 text-center text-xs font-semibold leading-tight transition-all ${
+                !hasOverlap ? "cursor-not-allowed opacity-40" : viable ? "" : "opacity-30"
               }`}
+              style={{
+                borderColor: color,
+                backgroundColor: isSelected ? `${color}26` : "transparent",
+                color,
+              }}
             >
-              <div className="flex shrink-0 gap-1">
-                {sets.map((s, i) => (
-                  <span
-                    key={s.leagueId}
-                    className={
-                      combo.leagueIds.includes(s.leagueId)
-                        ? "size-2.5 rounded-full"
-                        : "size-2.5 rounded-full border border-border bg-transparent"
-                    }
-                    style={
-                      combo.leagueIds.includes(s.leagueId)
-                        ? { backgroundColor: colors[i % colors.length] }
-                        : undefined
-                    }
-                  />
-                ))}
+              {s.label}
+            </button>
+          );
+        })}
+      </div>
+
+      <div className="flex flex-col gap-2">
+        {sorted.map((p) => {
+          const isFiltered = selected.length > 0 && !matchingPlayerIds.has(p.id);
+          const color = isFiltered ? GREY_COLOR : SIDE_COLOR[p.side];
+          return (
+            <button
+              key={p.id}
+              type="button"
+              onClick={() => setSelected(p.leagueIds)}
+              className="flex items-center justify-between gap-3 rounded-xl border p-3 text-left transition-colors hover:bg-muted/50"
+              style={{ borderColor: `${color}55`, backgroundColor: `${color}14` }}
+            >
+              <div className="min-w-0">
+                <p className="truncate text-sm font-medium">{p.name}</p>
+                <p className="text-xs text-muted-foreground">
+                  {p.proTeam}
+                  {p.projectedPoints > 0 && ` · ${p.projectedPoints.toFixed(1)} proj`}
+                </p>
               </div>
-              <div className="relative h-2 flex-1 overflow-hidden rounded-full bg-muted">
-                <div
-                  className="absolute inset-y-0 left-0 rounded-full"
-                  style={{
-                    width: `${(combo.players.length / maxCount) * 100}%`,
-                    backgroundColor: colors[0],
-                  }}
-                />
-              </div>
-              <span className="w-8 shrink-0 text-right text-xs font-bold tabular-nums">
-                {combo.players.length}
+              <span
+                className={`shrink-0 text-sm font-bold tabular-nums ${
+                  isFiltered ? "text-muted-foreground" : SIDE_TEXT_CLASS[p.side]
+                }`}
+              >
+                {p.netValue > 0 ? "+" : ""}
+                {p.netValue.toFixed(1)}
               </span>
             </button>
           );
         })}
       </div>
-      {combos.length > TOP_N && (
-        <p className="text-center text-xs text-muted-foreground">
-          Showing top {TOP_N} of {combos.length} overlap groups.
-        </p>
-      )}
-
-      {selectedCombo && (
-        <PlayerPanel
-          title={selectedCombo.leagueIds
-            .map((id) => sets.find((s) => s.leagueId === id)?.leagueName)
-            .join(" & ")}
-          players={selectedCombo.players}
-        />
-      )}
-    </div>
-  );
-}
-
-// ── Single-perspective view ─────────────────────────────────────────────────
-
-function OverlapView({
-  sets,
-  combos,
-  colors,
-}: {
-  sets: VennSetInfo[];
-  combos: VennComboInfo[];
-  colors: string[];
-}) {
-  if (sets.length === 0) {
-    return (
-      <p className="py-8 text-center text-sm text-muted-foreground">
-        No active leagues for this view.
-      </p>
-    );
-  }
-  if (sets.length === 1) {
-    return (
-      <p className="py-8 text-center text-sm text-muted-foreground">
-        Connect at least one more league to see roster overlap.
-      </p>
-    );
-  }
-  return <OverlapMatrix sets={sets} combos={combos} colors={colors} />;
-}
-
-// ── Entry point — perspective toggle + overlap view ────────────────────────
-
-export function VennExplorer({
-  ownSets,
-  ownCombos,
-  opponentSets,
-  opponentCombos,
-}: {
-  ownSets: VennSetInfo[];
-  ownCombos: VennComboInfo[];
-  opponentSets: VennSetInfo[];
-  opponentCombos: VennComboInfo[];
-}) {
-  const [perspective, setPerspective] = useState<"own" | "opponent">("own");
-  const sets = perspective === "own" ? ownSets : opponentSets;
-  const combos = perspective === "own" ? ownCombos : opponentCombos;
-  const colors = perspective === "own" ? OWN_COLORS : OPPONENT_COLORS;
-
-  return (
-    <div className="flex flex-col gap-6">
-      <div className="flex justify-center gap-1 rounded-lg border border-border bg-muted/40 p-1">
-        {(
-          [
-            { key: "own", label: "Your teams" },
-            { key: "opponent", label: "This week's opponents" },
-          ] as const
-        ).map((opt) => (
-          <button
-            key={opt.key}
-            type="button"
-            onClick={() => setPerspective(opt.key)}
-            className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
-              perspective === opt.key
-                ? opt.key === "opponent"
-                  ? "bg-red-500/15 text-red-600 shadow-sm dark:text-red-400"
-                  : "bg-card text-foreground shadow-sm"
-                : "text-muted-foreground hover:text-foreground"
-            }`}
-          >
-            {opt.label}
-          </button>
-        ))}
-      </div>
-
-      <OverlapView sets={sets} combos={combos} colors={colors} />
     </div>
   );
 }

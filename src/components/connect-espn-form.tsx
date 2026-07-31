@@ -16,6 +16,9 @@ export function ConnectEspnForm({ hasStoredCookies }: { hasStoredCookies: boolea
   const [season, setSeason] = useState(String(currentYear));
   const [espnS2, setEspnS2] = useState("");
   const [swid, setSwid] = useState("");
+  // When we already have a saved login, hide the cookie fields by default —
+  // showing them unconditionally every time undercut the point of reuse.
+  const [showCookieFields, setShowCookieFields] = useState(!hasStoredCookies);
 
   return (
     <form action={formAction} className="flex flex-col gap-3">
@@ -51,67 +54,97 @@ export function ConnectEspnForm({ hasStoredCookies }: { hasStoredCookies: boolea
         </div>
       </div>
 
-      <fieldset className="rounded-lg border border-dashed border-border p-3">
-        <legend className="px-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-          Private leagues only
-        </legend>
-        <p className="mb-3 text-xs text-muted-foreground">
-          {hasStoredCookies
-            ? "Skip these — we'll reuse the espn_s2/SWID from your last ESPN league. Only fill them in if you need to update your saved login."
-            : "Skip these two fields if your league is public. Most leagues are private by default, so you'll usually need them."}
-        </p>
-        <div className="grid gap-3 sm:grid-cols-2">
-          <div className="flex flex-col gap-1.5">
-            <label htmlFor="espn-s2" className="text-sm font-medium">
-              espn_s2 cookie
-            </label>
-            <input
-              id="espn-s2"
-              name="espnS2"
-              type="password"
-              autoComplete="off"
-              value={espnS2}
-              onChange={(e) => setEspnS2(e.target.value)}
-              className="rounded-md border border-border bg-background px-3 py-2 text-sm outline-none ring-ring focus:ring-2"
-            />
+      {hasStoredCookies && !showCookieFields ? (
+        <div className="flex items-center justify-between gap-3 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2.5">
+          <div className="flex items-center gap-2">
+            <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-emerald-500 text-[11px] font-bold text-white">
+              ✓
+            </span>
+            <p className="text-sm font-medium text-emerald-700 dark:text-emerald-400">
+              ESPN login saved — private leagues will connect automatically.
+            </p>
           </div>
-          <div className="flex flex-col gap-1.5">
-            <label htmlFor="espn-swid" className="text-sm font-medium">
-              SWID cookie
-            </label>
-            <input
-              id="espn-swid"
-              name="swid"
-              type="password"
-              autoComplete="off"
-              value={swid}
-              onChange={(e) => setSwid(e.target.value)}
-              placeholder="{XXXXXXXX-XXXX-...}"
-              className="rounded-md border border-border bg-background px-3 py-2 text-sm outline-none ring-ring focus:ring-2"
-            />
-          </div>
+          <button
+            type="button"
+            onClick={() => setShowCookieFields(true)}
+            className="shrink-0 text-xs font-medium text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+          >
+            Use a different login
+          </button>
         </div>
+      ) : (
+        <fieldset className="rounded-lg border border-dashed border-border p-3">
+          <legend className="px-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            Private leagues only
+          </legend>
+          <div className="mb-3 flex items-start justify-between gap-3">
+            <p className="text-xs text-muted-foreground">
+              Skip these two fields if your league is public. Most leagues are
+              private by default, so you&apos;ll usually need them.
+            </p>
+            {hasStoredCookies && (
+              <button
+                type="button"
+                onClick={() => setShowCookieFields(false)}
+                className="shrink-0 text-xs font-medium text-primary hover:underline"
+              >
+                Use saved login
+              </button>
+            )}
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="flex flex-col gap-1.5">
+              <label htmlFor="espn-s2" className="text-sm font-medium">
+                espn_s2 cookie
+              </label>
+              <input
+                id="espn-s2"
+                name="espnS2"
+                type="password"
+                autoComplete="off"
+                value={espnS2}
+                onChange={(e) => setEspnS2(e.target.value)}
+                className="rounded-md border border-border bg-background px-3 py-2 text-sm outline-none ring-ring focus:ring-2"
+              />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <label htmlFor="espn-swid" className="text-sm font-medium">
+                SWID cookie
+              </label>
+              <input
+                id="espn-swid"
+                name="swid"
+                type="password"
+                autoComplete="off"
+                value={swid}
+                onChange={(e) => setSwid(e.target.value)}
+                placeholder="{XXXXXXXX-XXXX-...}"
+                className="rounded-md border border-border bg-background px-3 py-2 text-sm outline-none ring-ring focus:ring-2"
+              />
+            </div>
+          </div>
 
-        <details className="mt-3 text-sm text-muted-foreground">
-          <summary className="cursor-pointer select-none hover:text-foreground">
-            Where do I find these cookies?
-          </summary>
-          <p className="mt-2">
-            Log into{" "}
-            <a
-              href="https://www.espn.com/fantasy/football/"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-primary hover:underline"
-            >
-              espn.com
-            </a>
-            , open DevTools (F12) → Application → Cookies →
-            espn.com, and copy the values of <code>espn_s2</code> and{" "}
-            <code>SWID</code>. Cookies are encrypted before being stored.
-          </p>
-        </details>
-      </fieldset>
+          <details className="mt-3 text-sm text-muted-foreground">
+            <summary className="cursor-pointer select-none hover:text-foreground">
+              Where do I find these cookies?
+            </summary>
+            <p className="mt-2">
+              Log into{" "}
+              <a
+                href="https://www.espn.com/fantasy/football/"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-primary hover:underline"
+              >
+                espn.com
+              </a>
+              , open DevTools (F12) → Application → Cookies →
+              espn.com, and copy the values of <code>espn_s2</code> and{" "}
+              <code>SWID</code>. Cookies are encrypted before being stored.
+            </p>
+          </details>
+        </fieldset>
+      )}
 
       <button
         type="submit"

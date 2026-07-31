@@ -3,16 +3,30 @@
 import { useMemo, useState } from "react";
 import type { RemainingPlayerAnalysis } from "@/lib/leagues/cross-league";
 
+type Tone = "clear" | "solvable" | "unsolvable";
+
+function getTone(p: RemainingPlayerAnalysis): Tone {
+  if (!p.hasConflict) return "clear";
+  // A conflict (starter in some of your leagues, opponent's starter in
+  // others) does NOT automatically mean there's no way to satisfy both —
+  // sweetSpot being non-null means a scoring range exists that wins
+  // everywhere. Only the absence of a sweet spot is the "bad" case.
+  return p.sweetSpot ? "solvable" : "unsolvable";
+}
+
+const CARD_TONE_STYLES: Record<Tone, string> = {
+  clear: "border-border bg-card",
+  solvable: "border-amber-500/30 bg-amber-500/5",
+  unsolvable: "border-destructive/40 bg-destructive/5",
+};
+
 function RemainingCard({ p }: { p: RemainingPlayerAnalysis }) {
   const yourLeagues = p.leagues.filter((l) => l.role === "your-starter");
   const oppLeagues = p.leagues.filter((l) => l.role === "opp-starter");
+  const tone = getTone(p);
 
   return (
-    <div
-      className={`rounded-xl border p-4 ${
-        p.hasConflict ? "border-amber-500/30 bg-amber-500/5" : "border-border bg-card"
-      }`}
-    >
+    <div className={`rounded-xl border p-4 ${CARD_TONE_STYLES[tone]}`}>
       <div className="mb-3 flex items-start justify-between gap-3">
         <div>
           <p className="font-semibold">{p.name}</p>
@@ -45,40 +59,47 @@ function RemainingCard({ p }: { p: RemainingPlayerAnalysis }) {
         ))}
       </div>
 
-      {p.hasConflict ? (
-        <div className="rounded-lg bg-muted/50 px-3 py-2 text-sm">
+      {p.hasConflict && (
+        <div
+          className={`mb-3 rounded-lg px-3 py-2 text-sm ${
+            tone === "solvable" ? "bg-amber-500/10" : "bg-destructive/10"
+          }`}
+        >
           {p.sweetSpot ? (
             <>
-              <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                Sweet spot{" "}
-              </span>
-              <span className="font-bold text-primary">
-                {p.sweetSpot.min.toFixed(1)}–{p.sweetSpot.max.toFixed(1)} pts
-              </span>
+              <p className="text-xs font-semibold uppercase tracking-wide text-amber-600">
+                Conflict — but there&apos;s a sweet spot
+              </p>
+              <p>
+                <span className="font-bold text-foreground">
+                  {p.sweetSpot.min.toFixed(1)}–{p.sweetSpot.max.toFixed(1)} pts
+                </span>{" "}
+                <span className="text-xs text-muted-foreground">
+                  wins every league this player affects.
+                </span>
+              </p>
             </>
           ) : (
-            <span className="text-xs font-semibold text-destructive">
-              No sweet spot — any score helps one league and hurts another.
-            </span>
+            <>
+              <p className="text-xs font-semibold uppercase tracking-wide text-destructive">
+                Conflict — no safe zone
+              </p>
+              <p className="text-xs text-muted-foreground">
+                Every possible score helps one league and hurts another — there&apos;s no number
+                that wins both.
+              </p>
+            </>
           )}
         </div>
-      ) : yourLeagues.length > 0 ? (
-        <p className="text-xs text-muted-foreground">
-          {yourLeagues[0].winningWithout
-            ? "Winning even if they score 0"
-            : yourLeagues[0].breakEvenPoints != null && yourLeagues[0].breakEvenPoints > 0
-              ? `Needs ~${yourLeagues[0].breakEvenPoints.toFixed(1)} pts to clinch`
-              : "Any score helps"}
-        </p>
-      ) : oppLeagues.length > 0 ? (
-        <p className="text-xs text-muted-foreground">
-          {oppLeagues[0].winningWithout
-            ? "You're winning even at their projection"
-            : oppLeagues[0].breakEvenPoints != null
-              ? `Must score under ${oppLeagues[0].breakEvenPoints.toFixed(1)} pts for you to win`
-              : "Keep an eye on this one"}
-        </p>
-      ) : null}
+      )}
+
+      <ul className="flex flex-col gap-1">
+        {[...yourLeagues, ...oppLeagues].map((l) => (
+          <li key={l.leagueId} className="text-xs text-muted-foreground">
+            <span className="font-medium text-foreground">{l.leagueName}:</span> {l.description}
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }
@@ -87,6 +108,8 @@ export function StillPlayingSection({ players }: { players: RemainingPlayerAnaly
   const [search, setSearch] = useState("");
   const [conflictsOnly, setConflictsOnly] = useState(false);
   const [position, setPosition] = useState("all");
+  const [league, setLeague] = useState("all");
+  const [side, setSide] = useState<"all" | "yours" | "opponents">("all");
 
   const positions = useMemo(() => {
     const set = new Set<string>();
@@ -94,9 +117,18 @@ export function StillPlayingSection({ players }: { players: RemainingPlayerAnaly
     return Array.from(set).sort();
   }, [players]);
 
+  const leagueNames = useMemo(() => {
+    const set = new Set<string>();
+    for (const p of players) for (const l of p.leagues) set.add(l.leagueName);
+    return Array.from(set).sort();
+  }, [players]);
+
   const filtered = players.filter((p) => {
     if (conflictsOnly && !p.hasConflict) return false;
     if (position !== "all" && p.position !== position) return false;
+    if (league !== "all" && !p.leagues.some((l) => l.leagueName === league)) return false;
+    if (side === "yours" && !p.leagues.some((l) => l.role === "your-starter")) return false;
+    if (side === "opponents" && !p.leagues.some((l) => l.role === "opp-starter")) return false;
     if (search && !p.name.toLowerCase().includes(search.toLowerCase())) return false;
     return true;
   });
@@ -130,6 +162,27 @@ export function StillPlayingSection({ players }: { players: RemainingPlayerAnaly
               {pos}
             </option>
           ))}
+        </select>
+        <select
+          value={league}
+          onChange={(e) => setLeague(e.target.value)}
+          className="rounded-lg border border-border bg-card px-2 py-1.5 text-sm"
+        >
+          <option value="all">All leagues</option>
+          {leagueNames.map((name) => (
+            <option key={name} value={name}>
+              {name}
+            </option>
+          ))}
+        </select>
+        <select
+          value={side}
+          onChange={(e) => setSide(e.target.value as "all" | "yours" | "opponents")}
+          className="rounded-lg border border-border bg-card px-2 py-1.5 text-sm"
+        >
+          <option value="all">Your team &amp; opponents</option>
+          <option value="yours">Your team only</option>
+          <option value="opponents">Opponents only</option>
         </select>
         <button
           type="button"

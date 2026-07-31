@@ -5,8 +5,7 @@ import { useState } from "react";
 const TABS = [
   { key: "overview", label: "Overview" },
   { key: "playing", label: "Still Playing" },
-  { key: "rooting", label: "Rooting Guide" },
-  { key: "overlap", label: "League Overlap" },
+  { key: "rooting", label: "Rooting & Overlap" },
 ] as const;
 
 type TabKey = (typeof TABS)[number]["key"];
@@ -14,14 +13,12 @@ type TabKey = (typeof TABS)[number]["key"];
 export function IntelTabs({
   overview,
   stillPlaying,
-  rootingGuide,
-  leagueOverlap,
+  rootingAndOverlap,
   stillPlayingCount,
 }: {
   overview: React.ReactNode;
   stillPlaying: React.ReactNode;
-  rootingGuide: React.ReactNode;
-  leagueOverlap: React.ReactNode;
+  rootingAndOverlap: React.ReactNode;
   stillPlayingCount: number;
 }) {
   const [active, setActive] = useState<TabKey>("overview");
@@ -52,8 +49,7 @@ export function IntelTabs({
 
       {active === "overview" && <div className="flex flex-col gap-8">{overview}</div>}
       {active === "playing" && stillPlaying}
-      {active === "rooting" && rootingGuide}
-      {active === "overlap" && leagueOverlap}
+      {active === "rooting" && <div className="flex flex-col gap-8">{rootingAndOverlap}</div>}
     </div>
   );
 }

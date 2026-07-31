@@ -19,7 +19,6 @@ import {
 import { getCurrentNflWeek } from "@/lib/leagues/week";
 import { loadMatchup } from "./_load-matchup";
 import type { LeagueMatchup } from "@/lib/leagues/types";
-import type { CrossLeaguePlayer } from "@/lib/leagues/cross-league";
 
 const PLATFORM_LABEL: Record<string, string> = {
   sleeper: "Sleeper",
@@ -27,33 +26,75 @@ const PLATFORM_LABEL: Record<string, string> = {
   yahoo: "Yahoo",
 };
 
-const MAX_OVERLAP_LEAGUES = 10;
+// Own + opponent teams share this cap, so it needs to cover roughly double
+// a user's actual league count — otherwise some of their leagues silently
+// drop out of the overlap/projection analysis. 16 covers up to 8 leagues at
+// the combinatorial cap in computeOverlapCombos (2^16 = 65536, still fast).
+const MAX_OVERLAP_LEAGUES = 16;
 
 type LeagueRow = typeof connectedLeagues.$inferSelect;
 
-function toOverlapViewData(rosterSets: LeagueRosterSet[]): {
-  sets: VennSetInfo[];
-  combos: VennComboInfo[];
-} {
+/**
+ * Combines "your teams" and "this week's opponents" into one overlap
+ * universe (own + opponent rosters together), so a single unified diagram
+ * can show every kind of overlap — teammates shared between your own
+ * leagues, players shared between opponents, and the cross-side conflicts
+ * (your starter in one league, an opponent's starter in another). Own and
+ * opponent sets share the same underlying leagueId, so each side gets a
+ * distinct suffixed id here.
+ */
+function toOverlapViewData(
+  ownRosterSets: LeagueRosterSet[],
+  opponentRosterSets: LeagueRosterSet[],
+): { sets: VennSetInfo[]; combos: VennComboInfo[] } {
+  const combined = [
+    ...ownRosterSets.map((s) => ({ ...s, leagueId: `${s.leagueId}:own` })),
+    ...opponentRosterSets.map((s) => ({ ...s, leagueId: `${s.leagueId}:opp` })),
+  ];
   const used =
-    rosterSets.length > MAX_OVERLAP_LEAGUES
-      ? rosterSets.slice(0, MAX_OVERLAP_LEAGUES)
-      : rosterSets;
+    combined.length > MAX_OVERLAP_LEAGUES ? combined.slice(0, MAX_OVERLAP_LEAGUES) : combined;
+
+  const setById = new Map(used.map((s) => [s.leagueId, s]));
 
   const combos = computeOverlapCombos(used).map((combo) => ({
     leagueIds: combo.leagueIds,
     players: combo.playerIds.map((id) => {
-      const owner = used.find((s) => s.playerIds.has(id))!;
-      const info = owner.players.get(id)!;
-      return { id, name: info.name, position: info.position };
+      // The "same" player can carry a different projection in each league
+      // context they're rostered in (different platform, different scoring
+      // settings). Gather every context this exclusive combo covers so the
+      // net value can sum them — own-side contexts add, opponent-side
+      // contexts subtract, since e.g. two opposing rosters both starting
+      // this player compounds how much they can hurt you.
+      const contexts = combo.leagueIds.map((leagueId) => {
+        const info = setById.get(leagueId)!.players.get(id)!;
+        return { isOwn: leagueId.endsWith(":own"), projectedPoints: info.projectedPoints ?? 0, info };
+      });
+      const first = contexts[0].info;
+      const projectedPoints = Math.max(...contexts.map((c) => c.projectedPoints));
+      const netValue = contexts.reduce(
+        (sum, c) => sum + (c.isOwn ? c.projectedPoints : -c.projectedPoints),
+        0,
+      );
+      return {
+        id,
+        name: first.name,
+        position: first.position,
+        proTeam: first.proTeam,
+        projectedPoints,
+        netValue,
+      };
     }),
   }));
 
-  const sets = used.map((s) => ({
-    leagueId: s.leagueId,
-    leagueName: s.leagueName,
-    size: s.playerIds.size,
-  }));
+  const sets: VennSetInfo[] = used.map((s) => {
+    const isOwn = s.leagueId.endsWith(":own");
+    return {
+      leagueId: s.leagueId,
+      label: s.teamName,
+      size: s.playerIds.size,
+      side: isOwn ? "own" : "opponent",
+    };
+  });
 
   return { sets, combos };
 }
@@ -295,137 +336,6 @@ function MatchupsTab({
   );
 }
 
-// ── Rooting guide ──────────────────────────────────────────────────────────
-
-function RootingGuide({
-  playerImpacts,
-}: {
-  playerImpacts: CrossLeaguePlayer[];
-}) {
-  const rootFor = playerImpacts
-    .filter((p) => p.netImpact > 0 && p.isYourStarter)
-    .slice(0, 8);
-
-  const rootAgainst = playerImpacts
-    .filter(
-      (p) =>
-        p.netImpact < 0 &&
-        p.leagues.every(
-          (l) => l.role === "opp-starter" || l.role === "opp-bench",
-        ),
-    )
-    .slice(0, 8);
-
-  const doubleEdged = playerImpacts
-    .filter((p) => {
-      const roles = new Set(p.leagues.map((l) => l.role));
-      return (
-        (roles.has("your-starter") || roles.has("your-bench")) &&
-        (roles.has("opp-starter") || roles.has("opp-bench"))
-      );
-    })
-    .slice(0, 5);
-
-  if (rootFor.length === 0 && rootAgainst.length === 0) {
-    return (
-      <p className="rounded-xl border border-dashed border-border p-8 text-center text-sm text-muted-foreground">
-        Nothing to root for yet — check back once matchups are underway.
-      </p>
-    );
-  }
-
-  return (
-    <section className="flex flex-col gap-3">
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-        {rootFor.length > 0 && (
-          <div className="rounded-xl border border-border bg-card p-4">
-            <p className="mb-3 text-xs font-bold uppercase tracking-widest text-emerald-500">
-              Root for ↑
-            </p>
-            <ul className="flex flex-col gap-2.5">
-              {rootFor.map((p) => {
-                const topProj = Math.max(
-                  ...p.leagues.map((l) => l.projectedPoints ?? 0),
-                );
-                return (
-                  <li
-                    key={p.playerId}
-                    className="flex items-center justify-between gap-2"
-                  >
-                    <div className="min-w-0">
-                      <p className="truncate text-sm font-medium">{p.name}</p>
-                      <p className="text-xs text-muted-foreground">
-                        {[p.position, p.proTeam].filter(Boolean).join(" · ")}
-                        {topProj > 0 && ` · ${topProj.toFixed(1)} proj`}
-                      </p>
-                    </div>
-                    <span className="shrink-0 text-sm font-bold tabular-nums text-emerald-500">
-                      +{p.netImpact.toFixed(1)}
-                    </span>
-                  </li>
-                );
-              })}
-            </ul>
-          </div>
-        )}
-
-        {rootAgainst.length > 0 && (
-          <div className="rounded-xl border border-border bg-card p-4">
-            <p className="mb-3 text-xs font-bold uppercase tracking-widest text-red-500">
-              Root against ↓
-            </p>
-            <ul className="flex flex-col gap-2.5">
-              {rootAgainst.map((p) => {
-                const topProj = Math.max(
-                  ...p.leagues.map((l) => l.projectedPoints ?? 0),
-                );
-                return (
-                  <li
-                    key={p.playerId}
-                    className="flex items-center justify-between gap-2"
-                  >
-                    <div className="min-w-0">
-                      <p className="truncate text-sm font-medium">{p.name}</p>
-                      <p className="text-xs text-muted-foreground">
-                        {[p.position, p.proTeam].filter(Boolean).join(" · ")}
-                        {topProj > 0 && ` · ${topProj.toFixed(1)} proj`}
-                      </p>
-                    </div>
-                    <span className="shrink-0 text-sm font-bold tabular-nums text-red-500">
-                      {p.netImpact.toFixed(1)}
-                    </span>
-                  </li>
-                );
-              })}
-            </ul>
-          </div>
-        )}
-
-        {doubleEdged.length > 0 && (
-          <div className="rounded-xl border border-amber-500/20 bg-amber-500/5 p-4">
-            <p className="mb-2 text-xs font-bold uppercase tracking-widest text-amber-500">
-              Complicated ⚡
-            </p>
-            <div className="flex flex-wrap gap-1.5">
-              {doubleEdged.map((p) => (
-                <span
-                  key={p.playerId}
-                  className="rounded-full border border-border bg-card px-2.5 py-0.5 text-xs font-medium"
-                >
-                  {p.name}
-                </span>
-              ))}
-            </div>
-            <p className="mt-2 text-xs text-muted-foreground">
-              On your roster in some leagues, opponent&apos;s in others.
-            </p>
-          </div>
-        )}
-      </div>
-    </section>
-  );
-}
-
 // ── Page ───────────────────────────────────────────────────────────────────
 
 export default async function DashboardPage() {
@@ -461,8 +371,9 @@ export default async function DashboardPage() {
     })),
   );
 
-  const overlapOwn = toOverlapViewData(buildRosterSets(matchups, "own"));
-  const overlapOpponent = toOverlapViewData(buildRosterSets(matchups, "opponent"));
+  const ownRosterSets = buildRosterSets(matchups, "own");
+  const opponentRosterSets = buildRosterSets(matchups, "opponent");
+  const overlap = toOverlapViewData(ownRosterSets, opponentRosterSets);
 
   const hasData = analysis.winProbabilities.length > 0;
   const sweepPct = Math.round(analysis.probAllWins * 100);
@@ -538,15 +449,7 @@ export default async function DashboardPage() {
             </Fragment>
           }
           stillPlaying={<StillPlayingSection players={analysis.remainingPlayers} />}
-          rootingGuide={<RootingGuide playerImpacts={analysis.playerImpacts} />}
-          leagueOverlap={
-            <VennExplorer
-              ownSets={overlapOwn.sets}
-              ownCombos={overlapOwn.combos}
-              opponentSets={overlapOpponent.sets}
-              opponentCombos={overlapOpponent.combos}
-            />
-          }
+          rootingAndOverlap={<VennExplorer sets={overlap.sets} combos={overlap.combos} />}
         />
       )}
     </div>

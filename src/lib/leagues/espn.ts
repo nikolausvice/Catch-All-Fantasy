@@ -22,6 +22,66 @@ const SLOT_ORDER: Record<string, number> = {
 };
 
 /**
+ * A bye week has no boxscore, so there's no way to recover which slot each
+ * player actually started in that week. Rather than leaving everyone
+ * unassigned, approximate a standard lineup (the common default ESPN
+ * format) so the bye-week view still reads like a normal one — just with
+ * one side empty — instead of a flat, unsorted "everyone's on the bench"
+ * list. Picks players by position in roster order (no scoring signal is
+ * available for a bye week to rank them by).
+ */
+// Case-insensitive, with the common alternate spellings ESPN's API (and our
+// own hand-written type declarations for it, which are assumptions rather
+// than confirmed-live values) might actually return.
+function normalizePosition(position: string | null): string {
+  const p = (position ?? "").toUpperCase().trim();
+  if (p === "TQB") return "QB";
+  if (p === "PK") return "K";
+  if (p === "DEF" || p === "D/ST" || p === "DST") return "DST";
+  return p;
+}
+
+const STANDARD_LINEUP: { slot: string; positions: string[]; count: number }[] = [
+  { slot: "QB", positions: ["QB"], count: 1 },
+  { slot: "RB", positions: ["RB"], count: 2 },
+  { slot: "WR", positions: ["WR"], count: 2 },
+  { slot: "TE", positions: ["TE"], count: 1 },
+  { slot: "FLEX", positions: ["RB", "WR", "TE"], count: 1 },
+  { slot: "K", positions: ["K"], count: 1 },
+  { slot: "D/ST", positions: ["DST"], count: 1 },
+];
+
+function assignStandardLineup(
+  players: { id: string; name: string; position: string | null; proTeam: string | null }[],
+): LeagueTeamPlayer[] {
+  const remaining = [...players];
+  const starters: LeagueTeamPlayer[] = [];
+
+  for (const { slot, positions, count } of STANDARD_LINEUP) {
+    for (let i = 0; i < count; i++) {
+      const idx = remaining.findIndex((p) => positions.includes(normalizePosition(p.position)));
+      if (idx === -1) break;
+      const [p] = remaining.splice(idx, 1);
+      starters.push({ ...p, isStarter: true, slot });
+    }
+  }
+
+  // Anything left over that didn't match one of the slots above (unusual
+  // positions, or a defaultPosition value we don't recognize) still needs a
+  // slot label — fall back to sorting it by the same priority order used
+  // for a normal week rather than leaving it in arbitrary roster order.
+  const bench: LeagueTeamPlayer[] = remaining
+    .slice()
+    .sort(
+      (a, b) => (SLOT_ORDER[normalizePosition(a.position)] ?? 98) -
+        (SLOT_ORDER[normalizePosition(b.position)] ?? 98),
+    )
+    .map((p) => ({ ...p, isStarter: false, slot: "BN" }));
+
+  return [...starters, ...bench];
+}
+
+/**
  * Builds a LeagueTeam from the boxscore roster for a given ESPN team.
  * The boxscore roster is slot-ordered (home/awayRoster array order = lineup
  * order), so we preserve that order: starters first, bench after.
@@ -150,26 +210,18 @@ export async function getEspnTeamMatchup({
   );
 
   if (!box) {
-    // Bye week — no boxscore exists this week, so there's no way to recover
-    // which slot each player actually started in. Best we can do is present
-    // the roster in the league's normal position order (QB, RB, WR, TE,
-    // FLEX, D/ST, K, ...) instead of whatever arbitrary order the season
-    // roster endpoint happens to return, so it doesn't look shuffled.
+    // Bye week — see assignStandardLineup for why the lineup is approximated.
     const summary = teamSummaries.get(numericTeamId);
     if (!summary) throw new Error(`No ESPN team ${teamId} found in league ${leagueId}.`);
     const raw = rawTeams.find((t) => t.id === numericTeamId);
-    const players = (raw?.roster ?? [])
-      .map((p) => ({
+    const players = assignStandardLineup(
+      (raw?.roster ?? []).map((p) => ({
         id: String(p.id),
         name: p.fullName,
         position: p.defaultPosition,
         proTeam: p.proTeamAbbreviation,
-        isStarter: false,
-      }))
-      .sort(
-        (a, b) =>
-          (SLOT_ORDER[a.position ?? ""] ?? 98) - (SLOT_ORDER[b.position ?? ""] ?? 98),
-      );
+      })),
+    );
     const team: LeagueTeam = { ...summary, players };
     return { week: period, team, opponent: null, teamScore: null, opponentScore: null };
   }

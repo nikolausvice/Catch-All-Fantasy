@@ -41,7 +41,14 @@ export function AddLeagueSection({ hasStoredEspnCookies }: { hasStoredEspnCookie
                   onClick={() => setSelected(platform.id)}
                   className="flex flex-col items-start gap-1 rounded-lg border border-border p-4 text-left transition-colors hover:bg-muted"
                 >
-                  <span className="font-semibold">{platform.label}</span>
+                  <span className="flex items-center gap-1.5 font-semibold">
+                    {platform.label}
+                    {platform.id === "espn" && hasStoredEspnCookies && (
+                      <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700 dark:text-emerald-400">
+                        ✓ Login saved
+                      </span>
+                    )}
+                  </span>
                   <span className="text-xs text-muted-foreground">
                     {platform.description}
                   </span>
