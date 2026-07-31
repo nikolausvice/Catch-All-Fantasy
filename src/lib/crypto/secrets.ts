@@ -40,3 +40,17 @@ export function decryptSecret(stored: string): string {
     decipher.final(),
   ]).toString("utf8");
 }
+
+/**
+ * Same as {@link decryptSecret}, but returns null instead of throwing when
+ * the value can't be decrypted (e.g. AUTH_SECRET was rotated, or differs
+ * between environments sharing one database). Callers should treat null the
+ * same as "no stored credential" rather than letting the page crash.
+ */
+export function tryDecryptSecret(stored: string): string | null {
+  try {
+    return decryptSecret(stored);
+  } catch {
+    return null;
+  }
+}

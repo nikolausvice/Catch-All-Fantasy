@@ -5,7 +5,7 @@ import { revalidatePath } from "next/cache";
 import { auth } from "@/auth";
 import { db } from "@/db/client";
 import { connectedLeagues, platformIdentities } from "@/db/schema";
-import { decryptSecret, encryptSecret } from "@/lib/crypto/secrets";
+import { encryptSecret, tryDecryptSecret } from "@/lib/crypto/secrets";
 import { EspnApiError, getEspnLeagueInfo } from "@/lib/espn/client";
 import { requireSessionUserId, STALE_SESSION_MESSAGE } from "@/lib/auth/require-user";
 import {
@@ -195,9 +195,10 @@ export async function connectEspnAccount(
     const stored = await db.query.platformIdentities.findFirst({
       where: and(eq(platformIdentities.userId, userId), eq(platformIdentities.platform, "espn")),
     });
-    if (stored?.encryptedSecret) {
-      effectiveEspnS2 = decryptSecret(stored.encryptedSecret);
-      effectiveSwid = stored.platformUserId;
+    const decrypted = stored?.encryptedSecret ? tryDecryptSecret(stored.encryptedSecret) : null;
+    if (decrypted) {
+      effectiveEspnS2 = decrypted;
+      effectiveSwid = stored!.platformUserId;
     }
   }
 

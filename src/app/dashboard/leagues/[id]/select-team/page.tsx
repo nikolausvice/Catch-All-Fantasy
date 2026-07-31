@@ -4,7 +4,7 @@ import { and, eq } from "drizzle-orm";
 import { auth } from "@/auth";
 import { db } from "@/db/client";
 import { connectedLeagues, platformIdentities } from "@/db/schema";
-import { decryptSecret } from "@/lib/crypto/secrets";
+import { tryDecryptSecret } from "@/lib/crypto/secrets";
 import { EspnApiError } from "@/lib/espn/client";
 import { getCachedEspnTeamSummaries, getCachedSleeperTeamSummaries } from "@/lib/leagues/cache";
 import { SleeperApiError } from "@/lib/sleeper/client";
@@ -41,9 +41,12 @@ async function loadSummaries(
             eq(platformIdentities.platformUserId, league.platformUserId),
           ),
         });
-        if (identity?.encryptedSecret) {
-          espnS2 = decryptSecret(identity.encryptedSecret);
-          swid = identity.platformUserId;
+        const decrypted = identity?.encryptedSecret
+          ? tryDecryptSecret(identity.encryptedSecret)
+          : null;
+        if (decrypted) {
+          espnS2 = decrypted;
+          swid = identity!.platformUserId;
         }
       }
 

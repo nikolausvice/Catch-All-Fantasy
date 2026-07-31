@@ -1,7 +1,7 @@
 import { and, eq } from "drizzle-orm";
 import { db } from "@/db/client";
 import { platformIdentities, connectedLeagues } from "@/db/schema";
-import { decryptSecret } from "@/lib/crypto/secrets";
+import { tryDecryptSecret } from "@/lib/crypto/secrets";
 import { EspnApiError } from "@/lib/espn/client";
 import { getCachedEspnTeamMatchup, getCachedSleeperTeamMatchup } from "@/lib/leagues/cache";
 import { SleeperApiError } from "@/lib/sleeper/client";
@@ -38,9 +38,12 @@ export async function loadMatchup(
             eq(platformIdentities.platformUserId, league.platformUserId),
           ),
         });
-        if (identity?.encryptedSecret) {
-          espnS2 = decryptSecret(identity.encryptedSecret);
-          swid = identity.platformUserId;
+        const decrypted = identity?.encryptedSecret
+          ? tryDecryptSecret(identity.encryptedSecret)
+          : null;
+        if (decrypted) {
+          espnS2 = decrypted;
+          swid = identity!.platformUserId;
         }
       }
 
