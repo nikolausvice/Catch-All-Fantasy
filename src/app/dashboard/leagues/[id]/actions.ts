@@ -29,5 +29,6 @@ export async function setUserTeam({
     );
 
   revalidatePath(`/dashboard/leagues/${leagueRowId}`);
+  revalidatePath(`/dashboard/leagues/${leagueRowId}/select-team`);
   revalidatePath("/dashboard");
 }

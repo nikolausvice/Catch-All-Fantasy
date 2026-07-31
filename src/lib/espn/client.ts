@@ -111,6 +111,48 @@ export async function getEspnLeagueTeams({
   }
 }
 
+export interface EspnBoxscoreSummary {
+  homeTeamId: number;
+  awayTeamId: number | null;
+  homeScore: number;
+  awayScore: number;
+}
+
+/** Fetches every matchup (boxscore) in the league for a given week. */
+export async function getEspnBoxscoresForWeek({
+  leagueId,
+  seasonId,
+  matchupPeriodId,
+  scoringPeriodId,
+  espnS2,
+  swid,
+}: {
+  leagueId: number;
+  seasonId: number;
+  matchupPeriodId: number;
+  scoringPeriodId: number;
+  espnS2?: string;
+  swid?: string;
+}): Promise<EspnBoxscoreSummary[]> {
+  const client = buildClient({ leagueId, espnS2, swid });
+
+  try {
+    const boxes = await client.getBoxscoreForWeek({
+      seasonId,
+      matchupPeriodId,
+      scoringPeriodId,
+    });
+    return boxes.map((box) => ({
+      homeTeamId: box.homeTeamId,
+      awayTeamId: box.awayTeamId || null,
+      homeScore: box.homeScore,
+      awayScore: box.awayScore,
+    }));
+  } catch (err) {
+    throw toEspnApiError(err, leagueId, seasonId);
+  }
+}
+
 function buildClient({
   leagueId,
   espnS2,
