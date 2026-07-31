@@ -68,3 +68,20 @@ export interface SleeperPlayer {
 }
 
 export type SleeperPlayersMap = Record<string, SleeperPlayer>;
+
+/**
+ * Per-player projection from Sleeper's /projections endpoint.
+ * `stats` contains projected stat totals; the relevant fantasy-point fields are
+ * `pts_ppr`, `pts_half_ppr`, and `pts_std` depending on league format.
+ */
+export interface SleeperProjection {
+  player_id: string;
+  stats: {
+    pts_ppr?: number;
+    pts_half_ppr?: number;
+    pts_std?: number;
+    [key: string]: number | undefined;
+  };
+}
+
+export type SleeperProjectionsMap = Record<string, SleeperProjection>;

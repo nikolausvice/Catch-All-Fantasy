@@ -4,6 +4,15 @@ export interface LeagueTeamPlayer {
   position: string | null;
   proTeam: string | null;
   isStarter: boolean;
+  /** Lineup slot label, e.g. "QB", "FLEX", "BN". Undefined if platform doesn't expose it. */
+  slot?: string;
+  /** Actual points scored this week. Undefined if not yet available. */
+  points?: number;
+  /**
+   * Projected points for the full week. For starters with 0 current points
+   * this indicates the player hasn't yet played and is still projected to score.
+   */
+  projectedPoints?: number;
 }
 
 export interface LeagueTeam {
@@ -32,7 +41,14 @@ export interface LeagueMatchup {
   /** The user's own team, with full roster. */
   team: LeagueTeam;
   /** null if the team has a bye this week. */
-  opponent: LeagueTeamSummary | null;
+  opponent: LeagueTeam | null;
   teamScore: number | null;
   opponentScore: number | null;
+  /**
+   * Projected final score for your team (current points + remaining starter
+   * projections). Populated when at least one platform provides projections.
+   */
+  teamProjectedScore?: number;
+  /** Projected final score for the opponent. */
+  opponentProjectedScore?: number;
 }

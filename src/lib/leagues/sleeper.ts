@@ -1,12 +1,14 @@
 import {
+  getSleeperLeague,
   getSleeperLeagueRosters,
   getSleeperLeagueUsers,
   getSleeperMatchups,
   getSleeperPlayers,
+  getSleeperProjections,
   sleeperAvatarUrl,
 } from "@/lib/sleeper/client";
-import type { SleeperRoster, SleeperUser } from "@/lib/sleeper/types";
-import type { LeagueMatchup, LeagueTeam, LeagueTeamSummary } from "./types";
+import type { SleeperMatchup, SleeperRoster, SleeperUser } from "@/lib/sleeper/types";
+import type { LeagueMatchup, LeagueTeam, LeagueTeamPlayer, LeagueTeamSummary } from "./types";
 
 function rosterTeamName(
   roster: SleeperRoster,
@@ -50,42 +52,101 @@ export async function getSleeperTeamSummaries(
   return summaries;
 }
 
-export async function getSleeperLeagueTeams(
-  leagueId: string,
-): Promise<LeagueTeam[]> {
-  const [{ rosters, summaries }, players] = await Promise.all([
-    getSleeperRosterSummaries(leagueId),
-    getSleeperPlayers(),
-  ]);
-
-  const summariesById = new Map(summaries.map((summary) => [summary.id, summary]));
-
-  return rosters.map((roster) => {
-    const summary = summariesById.get(String(roster.roster_id))!;
-    const starterIds = new Set(roster.starters ?? []);
-
-    return {
-      ...summary,
-      players: (roster.players ?? []).map((playerId) => {
-        const player = players[playerId];
-        return {
-          id: playerId,
-          name:
-            player?.full_name ||
-            `${player?.first_name ?? ""} ${player?.last_name ?? ""}`.trim() ||
-            playerId,
-          position: player?.position ?? null,
-          proTeam: player?.team ?? null,
-          isStarter: starterIds.has(playerId),
-        };
-      }),
-    };
-  });
+/**
+ * Determines which points key to use from the league's scoring_settings.
+ * Sleeper projections export `pts_ppr`, `pts_half_ppr`, and `pts_std`.
+ */
+function detectProjectionKey(
+  scoringSettings: Record<string, number>,
+): "pts_ppr" | "pts_half_ppr" | "pts_std" {
+  const rec = scoringSettings["rec"] ?? 0;
+  if (rec >= 1) return "pts_ppr";
+  if (rec >= 0.5) return "pts_half_ppr";
+  return "pts_std";
 }
 
 /**
- * The user's own team (full roster) plus this week's opponent. Returns
- * `opponent: null` when the team has a bye.
+ * Builds a full LeagueTeam from a Sleeper roster.
+ * Starters are returned in slot order (matching league's roster_positions);
+ * bench players follow. Points come from matchup data; projections from the
+ * weekly projections endpoint.
+ */
+function buildSleeperTeam({
+  roster,
+  summary,
+  slotPositions,
+  playersMap,
+  matchup,
+  projectionKey,
+  projectionsMap,
+}: {
+  roster: SleeperRoster;
+  summary: LeagueTeamSummary;
+  slotPositions: string[];
+  playersMap: Awaited<ReturnType<typeof getSleeperPlayers>>;
+  matchup: SleeperMatchup | undefined;
+  projectionKey: "pts_ppr" | "pts_half_ppr" | "pts_std";
+  projectionsMap: Awaited<ReturnType<typeof getSleeperProjections>>;
+}): LeagueTeam {
+  const playerPoints = matchup?.players_points ?? {};
+  const starterIds = roster.starters ?? [];
+  const starterSet = new Set(starterIds);
+
+  function makePlayer(playerId: string, isStarter: boolean, slotIndex?: number): LeagueTeamPlayer {
+    const player = playersMap[playerId];
+    const pts = playerPoints[playerId];
+    const proj = projectionsMap[playerId]?.stats?.[projectionKey];
+    return {
+      id: playerId,
+      name:
+        player?.full_name ||
+        `${player?.first_name ?? ""} ${player?.last_name ?? ""}`.trim() ||
+        playerId,
+      position: player?.position ?? null,
+      proTeam: player?.team ?? null,
+      isStarter,
+      slot: slotIndex !== undefined ? (slotPositions[slotIndex] ?? "BN") : "BN",
+      points: pts !== undefined ? pts : undefined,
+      projectedPoints: proj !== undefined ? proj : undefined,
+    };
+  }
+
+  const starterPlayers = starterIds.map((pid, i) => makePlayer(pid, true, i));
+  const benchPlayers = (roster.players ?? [])
+    .filter((pid) => !starterSet.has(pid))
+    .map((pid) => makePlayer(pid, false));
+
+  const allPlayers = [...starterPlayers, ...benchPlayers];
+
+  // Compute projected final score: actual points already scored +
+  // projected points for starters who haven't yet played (points === 0
+  // and projection > 0 is our proxy for "game hasn't started").
+  let teamProjectedScore: number | undefined;
+  const starters = allPlayers.filter((p) => p.isStarter);
+  const hasAnyProjection = starters.some((p) => p.projectedPoints !== undefined);
+  if (hasAnyProjection) {
+    teamProjectedScore = starters.reduce((sum, p) => {
+      const scored = p.points ?? 0;
+      const remaining = (scored === 0 && (p.projectedPoints ?? 0) > 0)
+        ? (p.projectedPoints ?? 0)
+        : scored;
+      return sum + remaining;
+    }, 0);
+  }
+
+  return {
+    ...summary,
+    players: allPlayers,
+    // Store on team so caller can aggregate
+    _projectedScore: teamProjectedScore,
+  } as LeagueTeam & { _projectedScore?: number };
+}
+
+/**
+ * The user's own team (full roster, slot-ordered) plus this week's opponent
+ * (also full roster). Returns `opponent: null` when the team has a bye.
+ * Both teams include per-player actual points, projected points, and the
+ * team-level projected final score.
  */
 export async function getSleeperTeamMatchup({
   leagueId,
@@ -96,18 +157,30 @@ export async function getSleeperTeamMatchup({
   rosterId: string;
   week: number;
 }): Promise<LeagueMatchup> {
-  const [teams, matchups] = await Promise.all([
-    getSleeperLeagueTeams(leagueId),
-    getSleeperMatchups(leagueId, week),
-  ]);
+  const [{ rosters, summaries }, playersMap, matchups, league] =
+    await Promise.all([
+      getSleeperRosterSummaries(leagueId),
+      getSleeperPlayers(),
+      getSleeperMatchups(leagueId, week),
+      getSleeperLeague(leagueId),
+    ]);
 
-  const teamsById = new Map(teams.map((team) => [team.id, team]));
-  const team = teamsById.get(rosterId);
-  if (!team) {
+  const projectionsMap = await getSleeperProjections(league.season, week);
+
+  const slotPositions = league.roster_positions;
+  const projectionKey = detectProjectionKey(league.scoring_settings);
+  const summariesById = new Map(summaries.map((s) => [s.id, s]));
+  const rostersById = new Map(rosters.map((r) => [String(r.roster_id), r]));
+  const matchupsByRosterId = new Map(
+    matchups.map((m) => [String(m.roster_id), m]),
+  );
+
+  const myRoster = rostersById.get(rosterId);
+  if (!myRoster) {
     throw new Error(`No Sleeper roster ${rosterId} found in league ${leagueId}.`);
   }
 
-  const myMatchup = matchups.find((m) => String(m.roster_id) === rosterId);
+  const myMatchup = matchupsByRosterId.get(rosterId);
   const opponentMatchup =
     myMatchup?.matchup_id != null
       ? matchups.find(
@@ -117,24 +190,45 @@ export async function getSleeperTeamMatchup({
         )
       : undefined;
 
-  const opponentTeam = opponentMatchup
-    ? teamsById.get(String(opponentMatchup.roster_id)) ?? null
-    : null;
+  const buildArgs = { slotPositions, playersMap, projectionKey, projectionsMap };
+
+  const teamBuilt = buildSleeperTeam({
+    roster: myRoster,
+    summary: summariesById.get(rosterId)!,
+    matchup: myMatchup,
+    ...buildArgs,
+  }) as LeagueTeam & { _projectedScore?: number };
+
+  let opponent: LeagueTeam | null = null;
+  let opponentProjectedScore: number | undefined;
+
+  if (opponentMatchup) {
+    const oppRosterId = String(opponentMatchup.roster_id);
+    const oppRoster = rostersById.get(oppRosterId);
+    const oppSummary = summariesById.get(oppRosterId);
+    if (oppRoster && oppSummary) {
+      const oppBuilt = buildSleeperTeam({
+        roster: oppRoster,
+        summary: oppSummary,
+        matchup: opponentMatchup,
+        ...buildArgs,
+      }) as LeagueTeam & { _projectedScore?: number };
+      opponentProjectedScore = oppBuilt._projectedScore;
+      // Strip the internal field before returning
+      const { _projectedScore: _opp, ...cleanOpp } = oppBuilt as LeagueTeam & { _projectedScore?: number };
+      opponent = cleanOpp as LeagueTeam;
+    }
+  }
+
+  const { _projectedScore: teamProjectedScore, ...cleanTeam } = teamBuilt;
 
   return {
     week,
-    team,
-    opponent: opponentTeam
-      ? {
-          id: opponentTeam.id,
-          name: opponentTeam.name,
-          avatarUrl: opponentTeam.avatarUrl,
-          wins: opponentTeam.wins,
-          losses: opponentTeam.losses,
-          ties: opponentTeam.ties,
-        }
-      : null,
+    team: cleanTeam as LeagueTeam,
+    opponent,
     teamScore: myMatchup?.points ?? null,
     opponentScore: opponentMatchup?.points ?? null,
+    teamProjectedScore,
+    opponentProjectedScore,
   };
 }

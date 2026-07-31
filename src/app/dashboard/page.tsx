@@ -1,15 +1,12 @@
 import Link from "next/link";
-import { and, desc, eq } from "drizzle-orm";
+import { desc, eq } from "drizzle-orm";
 import { auth } from "@/auth";
 import { db } from "@/db/client";
-import { connectedLeagues, platformIdentities } from "@/db/schema";
-import { ConnectSleeperForm } from "@/components/connect-sleeper-form";
-import { ConnectEspnForm } from "@/components/connect-espn-form";
-import { decryptSecret } from "@/lib/crypto/secrets";
-import { EspnApiError } from "@/lib/espn/client";
-import { getCachedEspnTeamMatchup, getCachedSleeperTeamMatchup } from "@/lib/leagues/cache";
+import { connectedLeagues } from "@/db/schema";
+import { AddLeagueSection } from "@/components/add-league-section";
+import { AvatarImage } from "@/components/avatar-image";
 import { getCurrentNflWeek } from "@/lib/leagues/week";
-import { SleeperApiError } from "@/lib/sleeper/client";
+import { loadMatchup } from "./_load-matchup";
 import type { LeagueMatchup } from "@/lib/leagues/types";
 
 const PLATFORM_LABEL: Record<string, string> = {
@@ -20,84 +17,28 @@ const PLATFORM_LABEL: Record<string, string> = {
 
 type LeagueRow = typeof connectedLeagues.$inferSelect;
 
-async function loadMatchup(
-  league: LeagueRow,
-  userId: string,
-  week: number,
-): Promise<{ matchup: LeagueMatchup | null; error: string | null }> {
-  try {
-    if (league.platform === "sleeper") {
-      return {
-        matchup: await getCachedSleeperTeamMatchup(
-          league.platformLeagueId,
-          league.userTeamId!,
-          week,
-        ),
-        error: null,
-      };
-    }
-
-    if (league.platform === "espn") {
-      let espnS2: string | undefined;
-      let swid: string | undefined;
-
-      if (league.platformUserId) {
-        const identity = await db.query.platformIdentities.findFirst({
-          where: and(
-            eq(platformIdentities.userId, userId),
-            eq(platformIdentities.platform, "espn"),
-            eq(platformIdentities.platformUserId, league.platformUserId),
-          ),
-        });
-        if (identity?.encryptedSecret) {
-          espnS2 = decryptSecret(identity.encryptedSecret);
-          swid = identity.platformUserId;
-        }
-      }
-
-      return {
-        matchup: await getCachedEspnTeamMatchup(
-          Number(league.platformLeagueId),
-          Number(league.season),
-          league.userTeamId!,
-          espnS2,
-          swid,
-        ),
-        error: null,
-      };
-    }
-
-    return { matchup: null, error: "Yahoo leagues aren't supported yet." };
-  } catch (err) {
-    if (err instanceof SleeperApiError || err instanceof EspnApiError) {
-      return { matchup: null, error: err.message };
-    }
-    throw err;
-  }
-}
-
 function TeamScore({
   name,
   avatarUrl,
   score,
   emphasized,
+  reversed,
 }: {
   name: string;
   avatarUrl: string | null;
   score: number | null;
   emphasized?: boolean;
+  reversed?: boolean;
 }) {
   return (
-    <div className="flex min-w-0 flex-1 items-center gap-2">
-      {avatarUrl ? (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img src={avatarUrl} alt="" className="size-8 shrink-0 rounded-md" />
-      ) : (
-        <div className="flex size-8 shrink-0 items-center justify-center rounded-md bg-muted text-xs font-medium text-muted-foreground">
-          {name[0]?.toUpperCase() ?? "?"}
-        </div>
-      )}
-      <div className="min-w-0">
+    <div className={`flex min-w-0 flex-1 items-center gap-2 ${reversed ? "flex-row-reverse" : ""}`}>
+      <AvatarImage
+        name={name}
+        avatarUrl={avatarUrl}
+        className="size-8 shrink-0 rounded-md"
+        fallbackClassName="flex size-8 shrink-0 items-center justify-center rounded-md bg-muted text-xs font-medium text-muted-foreground"
+      />
+      <div className={`min-w-0 ${reversed ? "text-right" : ""}`}>
         <p className="truncate text-sm font-medium">{name}</p>
         {score != null && (
           <p
@@ -172,6 +113,7 @@ function MatchupCard({
             name={matchup.opponent.name}
             avatarUrl={matchup.opponent.avatarUrl}
             score={matchup.opponentScore}
+            reversed
           />
         ) : (
           <span className="shrink-0 text-xs text-muted-foreground">Bye</span>
@@ -219,15 +161,27 @@ export default async function DashboardPage() {
     })),
   );
 
+  const hasActiveMatchups = matchups.some((m) => m.matchup !== null);
+
   return (
     <div className="flex flex-col gap-8">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">
-          Your matchups
-        </h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Every league you&apos;re playing in, on one screen.
-        </p>
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight">
+            Your matchups
+          </h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Every league you&apos;re playing in, on one screen.
+          </p>
+        </div>
+        {hasActiveMatchups && (
+          <Link
+            href="/dashboard/intel"
+            className="shrink-0 rounded-lg border border-border bg-card px-4 py-2 text-sm font-semibold hover:bg-muted"
+          >
+            Cross-League Intel →
+          </Link>
+        )}
       </div>
 
       {leagues.length === 0 && (
@@ -280,28 +234,7 @@ export default async function DashboardPage() {
         </section>
       )}
 
-      <details className="rounded-xl border border-border bg-card p-4">
-        <summary className="cursor-pointer select-none text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-          + Add another league
-        </summary>
-        <div className="mt-4 grid gap-6 lg:grid-cols-2">
-          <div>
-            <h3 className="mb-1 text-sm font-semibold">Connect Sleeper</h3>
-            <p className="mb-4 text-sm text-muted-foreground">
-              Just your username — Sleeper&apos;s API is public and read-only.
-            </p>
-            <ConnectSleeperForm />
-          </div>
-          <div>
-            <h3 className="mb-1 text-sm font-semibold">Connect ESPN</h3>
-            <p className="mb-4 text-sm text-muted-foreground">
-              League ID and season are enough for public leagues; private
-              leagues also need the espn_s2 and SWID cookies.
-            </p>
-            <ConnectEspnForm />
-          </div>
-        </div>
-      </details>
+      <AddLeagueSection />
     </div>
   );
 }

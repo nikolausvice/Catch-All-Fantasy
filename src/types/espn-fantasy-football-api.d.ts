@@ -34,11 +34,38 @@ declare module "espn-fantasy-football-api/node" {
     ties: number;
   }
 
+  /** A player as they appear in a boxscore lineup entry. */
+  interface BoxscorePlayer {
+    id: number;
+    fullName: string;
+    /**
+     * The lineup slot this player occupies this week, e.g. "QB", "RB", "WR",
+     * "TE", "RB/WR/TE", "D/ST", "K", "Bench", "IR".
+     */
+    rosteredPosition: string;
+    /** Actual fantasy points scored this week. */
+    totalPoints: number;
+  }
+
   interface EspnBoxscore {
     homeTeamId: number;
     awayTeamId: number | null;
     homeScore: number;
     awayScore: number;
+    /**
+     * Projected final score for the home team (current + remaining projections).
+     * Only populated for the current matchup period.
+     */
+    homeProjectedScore: number;
+    /**
+     * Projected final score for the away team.
+     * Only populated for the current matchup period.
+     */
+    awayProjectedScore: number;
+    /** Home team's lineup entries in slot order. */
+    homeRoster: BoxscorePlayer[];
+    /** Away team's lineup entries in slot order. */
+    awayRoster: BoxscorePlayer[];
   }
 
   export class Client {

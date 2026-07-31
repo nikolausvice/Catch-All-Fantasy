@@ -9,7 +9,9 @@ import { EspnApiError } from "@/lib/espn/client";
 import { getCachedEspnTeamMatchup, getCachedSleeperTeamMatchup } from "@/lib/leagues/cache";
 import { getCurrentNflWeek } from "@/lib/leagues/week";
 import { SleeperApiError } from "@/lib/sleeper/client";
-import type { LeagueMatchup } from "@/lib/leagues/types";
+import { RefreshButton } from "@/components/refresh-button";
+import { AvatarImage } from "@/components/avatar-image";
+import type { LeagueMatchup, LeagueTeam, LeagueTeamPlayer } from "@/lib/leagues/types";
 
 const PLATFORM_LABEL: Record<string, string> = {
   sleeper: "Sleeper",
@@ -73,47 +75,84 @@ async function loadMatchup(
   }
 }
 
-function TeamRow({
-  label,
+function record(team: { wins: number; losses: number; ties: number }): string {
+  return `${team.wins}-${team.losses}${team.ties ? `-${team.ties}` : ""}`;
+}
+
+function TeamAvatar({
   name,
   avatarUrl,
-  score,
-  record,
+  size = "md",
 }: {
-  label: string;
   name: string;
   avatarUrl: string | null;
-  score: number | null;
-  record: string;
+  size?: "sm" | "md";
 }) {
+  const cls = size === "sm" ? "size-7" : "size-9";
   return (
-    <div className="flex items-center gap-3">
-      {avatarUrl ? (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img src={avatarUrl} alt="" className="size-11 shrink-0 rounded-md" />
-      ) : (
-        <div className="flex size-11 shrink-0 items-center justify-center rounded-md bg-muted text-sm font-medium text-muted-foreground">
-          {name[0]?.toUpperCase() ?? "?"}
-        </div>
-      )}
-      <div className="min-w-0 flex-1">
-        <p className="text-xs uppercase tracking-wide text-muted-foreground">
-          {label}
-        </p>
-        <p className="truncate font-medium">{name}</p>
-        <p className="text-xs text-muted-foreground">{record}</p>
-      </div>
-      {score != null && (
-        <p className="shrink-0 text-xl font-semibold tabular-nums">
-          {score.toFixed(1)}
-        </p>
-      )}
+    <AvatarImage
+      name={name}
+      avatarUrl={avatarUrl}
+      className={`${cls} shrink-0 rounded-md`}
+      fallbackClassName={`${cls} flex shrink-0 items-center justify-center rounded-md bg-muted text-xs font-medium text-muted-foreground`}
+    />
+  );
+}
+
+function PlayerList({
+  players,
+  title,
+}: {
+  players: LeagueTeamPlayer[];
+  title: string;
+}) {
+  if (players.length === 0) return null;
+  return (
+    <div>
+      <p className="mb-1 text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
+        {title}
+      </p>
+      <ul className="flex flex-col">
+        {players.map((player) => (
+          <li
+            key={player.id}
+            className="flex items-center gap-2 border-b border-border/50 py-1.5 text-sm last:border-0"
+          >
+            {player.slot && (
+              <span className="w-10 shrink-0 text-[11px] font-semibold uppercase text-muted-foreground">
+                {player.slot}
+              </span>
+            )}
+            <span className="min-w-0 flex-1 truncate">{player.name}</span>
+            <span className="shrink-0 text-xs text-muted-foreground">
+              {[player.position, player.proTeam].filter(Boolean).join(" · ")}
+            </span>
+            {player.points !== undefined && (
+              <span className="w-9 shrink-0 text-right text-xs font-semibold tabular-nums">
+                {player.points.toFixed(1)}
+              </span>
+            )}
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }
 
-function record(team: { wins: number; losses: number; ties: number }): string {
-  return `${team.wins}-${team.losses}${team.ties ? `-${team.ties}` : ""}`;
+function RosterPanel({ team }: { team: LeagueTeam }) {
+  const starters = team.players.filter((p) => p.isStarter);
+  const bench = team.players.filter((p) => !p.isStarter);
+
+  if (starters.length === 0) {
+    return <PlayerList players={bench} title="Players" />;
+  }
+
+  return (
+    <div className="flex flex-col gap-5">
+      <PlayerList players={starters} title="Starters" />
+      <PlayerList players={bench} title="Bench" />
+    </div>
+  );
 }
 
 export default async function LeagueDetailPage({
@@ -139,6 +178,7 @@ export default async function LeagueDetailPage({
 
   return (
     <div className="flex flex-col gap-6">
+      {/* Header */}
       <div>
         <Link
           href="/dashboard"
@@ -157,12 +197,15 @@ export default async function LeagueDetailPage({
               {matchup ? ` · Week ${matchup.week}` : ""}
             </p>
           </div>
-          <Link
-            href={`/dashboard/leagues/${id}/select-team`}
-            className="shrink-0 rounded-md border border-border px-3 py-1.5 text-xs font-medium hover:bg-muted"
-          >
-            Switch team
-          </Link>
+          <div className="flex shrink-0 items-center gap-2">
+            <RefreshButton />
+            <Link
+              href={`/dashboard/leagues/${id}/select-team`}
+              className="rounded-md border border-border px-3 py-1.5 text-xs font-medium hover:bg-muted"
+            >
+              Switch team
+            </Link>
+          </div>
         </div>
       </div>
 
@@ -173,62 +216,82 @@ export default async function LeagueDetailPage({
       )}
 
       {matchup && (
-        <div className="flex flex-col gap-4 rounded-xl border border-border bg-card p-4">
-          <TeamRow
-            label="Your team"
-            name={matchup.team.name}
-            avatarUrl={matchup.team.avatarUrl}
-            score={matchup.teamScore}
-            record={record(matchup.team)}
-          />
-          <div className="flex items-center gap-3 text-xs font-semibold uppercase text-muted-foreground">
-            <div className="h-px flex-1 bg-border" />
-            vs
-            <div className="h-px flex-1 bg-border" />
-          </div>
-          {matchup.opponent ? (
-            <TeamRow
-              label="Opponent"
-              name={matchup.opponent.name}
-              avatarUrl={matchup.opponent.avatarUrl}
-              score={matchup.opponentScore}
-              record={record(matchup.opponent)}
-            />
-          ) : (
-            <p className="text-center text-sm text-muted-foreground">
-              Bye week — no opponent scheduled.
-            </p>
-          )}
-        </div>
-      )}
+        <>
+          {/* Score panel — left/right split */}
+          <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-3 rounded-xl border border-border bg-card p-4">
+            {/* User team */}
+            <div className="flex flex-col gap-1">
+              <p className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
+                Your team
+              </p>
+              <div className="flex items-center gap-2">
+                <TeamAvatar
+                  name={matchup.team.name}
+                  avatarUrl={matchup.team.avatarUrl}
+                />
+                <p className="truncate font-semibold">{matchup.team.name}</p>
+              </div>
+              {matchup.teamScore != null && (
+                <p className="text-3xl font-bold tabular-nums">
+                  {matchup.teamScore.toFixed(1)}
+                </p>
+              )}
+              <p className="text-xs text-muted-foreground">
+                {record(matchup.team)}
+              </p>
+            </div>
 
-      {matchup && (
-        <div>
-          <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-            Your roster
-          </h2>
-          {matchup.team.players.length === 0 ? (
-            <p className="text-sm text-muted-foreground">
-              No players rostered yet.
-            </p>
-          ) : (
-            <ul className="flex flex-col gap-1 rounded-xl border border-border bg-card p-4">
-              {matchup.team.players.map((player) => (
-                <li
-                  key={player.id}
-                  className="flex items-center justify-between gap-2 py-1 text-sm"
-                >
-                  <span className="truncate">{player.name}</span>
-                  <span className="shrink-0 text-xs text-muted-foreground">
-                    {[player.position, player.proTeam]
-                      .filter(Boolean)
-                      .join(" · ")}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
+            <span className="text-xs font-semibold uppercase text-muted-foreground">
+              vs
+            </span>
+
+            {/* Opponent */}
+            {matchup.opponent ? (
+              <div className="flex flex-col items-end gap-1 text-right">
+                <p className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
+                  Opponent
+                </p>
+                <div className="flex items-center gap-2">
+                  <p className="truncate font-semibold">
+                    {matchup.opponent.name}
+                  </p>
+                  <TeamAvatar
+                    name={matchup.opponent.name}
+                    avatarUrl={matchup.opponent.avatarUrl}
+                  />
+                </div>
+                {matchup.opponentScore != null && (
+                  <p className="text-3xl font-bold tabular-nums">
+                    {matchup.opponentScore.toFixed(1)}
+                  </p>
+                )}
+                <p className="text-xs text-muted-foreground">
+                  {record(matchup.opponent)}
+                </p>
+              </div>
+            ) : (
+              <p className="text-right text-sm text-muted-foreground">
+                Bye week
+              </p>
+            )}
+          </div>
+
+          {/* Roster panels */}
+          <div className="grid gap-4 md:grid-cols-2">
+            <div className="rounded-xl border border-border bg-card p-4">
+              <h2 className="mb-4 text-sm font-semibold">Your lineup</h2>
+              <RosterPanel team={matchup.team} />
+            </div>
+            {matchup.opponent && (
+              <div className="rounded-xl border border-border bg-card p-4">
+                <h2 className="mb-4 text-sm font-semibold">
+                  {matchup.opponent.name}
+                </h2>
+                <RosterPanel team={matchup.opponent} />
+              </div>
+            )}
+          </div>
+        </>
       )}
     </div>
   );

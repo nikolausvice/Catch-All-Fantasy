@@ -111,11 +111,22 @@ export async function getEspnLeagueTeams({
   }
 }
 
+export interface EspnBoxscorePlayer {
+  id: number;
+  fullName: string;
+  rosteredPosition: string;
+  totalPoints: number;
+}
+
 export interface EspnBoxscoreSummary {
   homeTeamId: number;
   awayTeamId: number | null;
   homeScore: number;
   awayScore: number;
+  homeProjectedScore: number | null;
+  awayProjectedScore: number | null;
+  homeRoster: EspnBoxscorePlayer[];
+  awayRoster: EspnBoxscorePlayer[];
 }
 
 /** Fetches every matchup (boxscore) in the league for a given week. */
@@ -142,11 +153,25 @@ export async function getEspnBoxscoresForWeek({
       matchupPeriodId,
       scoringPeriodId,
     });
+
+    function mapRoster(roster: import("espn-fantasy-football-api/node").BoxscorePlayer[]): EspnBoxscorePlayer[] {
+      return (roster ?? []).map((p) => ({
+        id: p.id,
+        fullName: p.fullName,
+        rosteredPosition: p.rosteredPosition,
+        totalPoints: p.totalPoints ?? 0,
+      }));
+    }
+
     return boxes.map((box) => ({
       homeTeamId: box.homeTeamId,
-      awayTeamId: box.awayTeamId || null,
+      awayTeamId: box.awayTeamId ?? null,
       homeScore: box.homeScore,
       awayScore: box.awayScore,
+      homeProjectedScore: box.homeProjectedScore ?? null,
+      awayProjectedScore: box.awayProjectedScore ?? null,
+      homeRoster: mapRoster(box.homeRoster ?? []),
+      awayRoster: mapRoster(box.awayRoster ?? []),
     }));
   } catch (err) {
     throw toEspnApiError(err, leagueId, seasonId);
@@ -186,7 +211,19 @@ function toEspnApiError(
       404,
     );
   }
-  return new EspnApiError("Failed to reach ESPN's API.", status ?? 0);
+  if (!status) {
+    // Non-HTTP error — ESPN's API returned unexpected data or the package
+    // couldn't parse the response. Common cause: league hasn't drafted yet
+    // or the season hasn't started, so rosters/matchups don't exist.
+    return new EspnApiError(
+      "Couldn't load data from ESPN — the league may not have drafted yet, or the season hasn't started.",
+      0,
+    );
+  }
+  return new EspnApiError(
+    `ESPN returned an unexpected error (HTTP ${status}).`,
+    status,
+  );
 }
 
 function getAxiosStatus(err: unknown): number | undefined {

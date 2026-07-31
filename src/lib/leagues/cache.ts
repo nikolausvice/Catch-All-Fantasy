@@ -12,21 +12,21 @@ import { getSleeperTeamMatchup, getSleeperTeamSummaries } from "./sleeper";
 
 export const getCachedSleeperTeamSummaries = unstable_cache(
   (leagueId: string) => getSleeperTeamSummaries(leagueId),
-  ["sleeper-team-summaries"],
+  ["sleeper-team-summaries-v2"],
   { revalidate: 90 },
 );
 
 export const getCachedSleeperTeamMatchup = unstable_cache(
   (leagueId: string, rosterId: string, week: number) =>
     getSleeperTeamMatchup({ leagueId, rosterId, week }),
-  ["sleeper-team-matchup"],
+  ["sleeper-team-matchup-v2"],
   { revalidate: 60 },
 );
 
 export const getCachedEspnTeamSummaries = unstable_cache(
   (leagueId: number, seasonId: number, espnS2?: string, swid?: string) =>
     getEspnTeamSummaries({ leagueId, seasonId, espnS2, swid }),
-  ["espn-team-summaries"],
+  ["espn-team-summaries-v2"],
   { revalidate: 90 },
 );
 
@@ -38,6 +38,6 @@ export const getCachedEspnTeamMatchup = unstable_cache(
     espnS2?: string,
     swid?: string,
   ) => getEspnTeamMatchup({ leagueId, seasonId, teamId, espnS2, swid }),
-  ["espn-team-matchup"],
+  ["espn-team-matchup-v2"],
   { revalidate: 60 },
 );

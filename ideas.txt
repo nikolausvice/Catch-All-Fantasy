@@ -1,0 +1,11 @@
+TODO:
+    Venn Diagram
+    Trade analyzer
+    League with bye week size issue
+    Projections
+    Probability factoring in possibility to win 
+        multiple if theres a player you have that
+        will lose the game if you score what u 
+        need to win
+    Click in matchup in iintel to go to league as well
+    

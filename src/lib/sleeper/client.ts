@@ -3,6 +3,7 @@ import type {
   SleeperMatchup,
   SleeperNflState,
   SleeperPlayersMap,
+  SleeperProjectionsMap,
   SleeperRoster,
   SleeperUser,
 } from "./types";
@@ -64,6 +65,12 @@ export async function getSleeperLeaguesForUser(
   );
 }
 
+export async function getSleeperLeague(leagueId: string): Promise<SleeperLeague> {
+  return sleeperFetch<SleeperLeague>(`/league/${leagueId}`, {
+    next: { revalidate: 300 },
+  });
+}
+
 export async function getSleeperLeagueRosters(
   leagueId: string,
 ): Promise<SleeperRoster[]> {
@@ -94,6 +101,20 @@ export async function getSleeperNflState(): Promise<SleeperNflState> {
   return sleeperFetch<SleeperNflState>("/state/nfl", {
     next: { revalidate: 3600 },
   });
+}
+
+/**
+ * Per-player projections for a given week (~2MB). Cached for 30 min since
+ * projections can update during game days but don't change every minute.
+ */
+export async function getSleeperProjections(
+  year: string,
+  week: number,
+): Promise<SleeperProjectionsMap> {
+  return sleeperFetch<SleeperProjectionsMap>(
+    `/projections/nfl/${year}/${week}?season_type=regular`,
+    { next: { revalidate: 1800 } },
+  );
 }
 
 /**
