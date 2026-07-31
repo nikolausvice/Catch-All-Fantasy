@@ -14,8 +14,11 @@ comparison itself, come next.
 - **Next.js 16** (App Router, TypeScript, Turbopack) — frontend + backend
 - **Tailwind CSS v4** — CSS-first config, no `tailwind.config.js`
 - **Auth.js v5** (`next-auth`) — email/password (Credentials provider), JWT sessions
-- **SQLite via libSQL + Drizzle ORM** — same client/schema locally and in prod:
-  a local file (`local.db`) in dev, [Turso](https://turso.tech) in prod
+- **Postgres via Neon + Drizzle ORM** — same client/schema locally and in
+  prod, backed by [Neon](https://neon.tech) (provisioned via the Vercel
+  marketplace integration). Note: the integration's default install shares
+  one database across dev/preview/production — set up per-environment
+  branches in the Neon dashboard if you want dev writes isolated from prod
 - **next-themes** — light/dark mode
 - **Vercel** — target deployment platform
 
@@ -29,7 +32,7 @@ src/app/api/auth/[...nextauth]/  Auth.js route handler
 src/app/dashboard/                Authenticated area: connect leagues, list them
 src/auth.ts                       Auth.js config (Credentials provider, Drizzle adapter)
 src/db/schema.ts                  Drizzle schema: auth tables + platform_identities/connected_leagues
-src/db/client.ts                  libSQL client (local file or Turso, same code path)
+src/db/client.ts                  Neon serverless (HTTP) client
 src/lib/sleeper/                 Sleeper API client + types
 src/lib/espn/                     ESPN API client (wraps espn-fantasy-football-api)
 src/lib/crypto/secrets.ts         AES-256-GCM encrypt/decrypt for stored credentials (ESPN cookies)
@@ -46,8 +49,9 @@ drizzle/                          Generated SQL migrations
 
 2. Copy `.env.example` to `.env.local` and set `AUTH_SECRET` (generate one
    with `node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"`).
-   Leave `TURSO_DATABASE_URL`/`TURSO_AUTH_TOKEN` blank for local dev — a
-   `local.db` SQLite file is created automatically.
+   For `DATABASE_URL`, run `vercel env pull .env.local` to pull the Neon
+   connection string (requires the project to be linked with `vercel link`
+   and the Neon integration installed — see Deploying below).
 
 3. Create the database tables:
 
@@ -78,12 +82,12 @@ drizzle/                          Generated SQL migrations
 
 ## Deploying
 
-- **Turso**: create a database (`turso db create catch-all-fantasy`), get its
-  URL and an auth token, and set `TURSO_DATABASE_URL` / `TURSO_AUTH_TOKEN`.
-  Run `npm run db:migrate` once against those prod env vars to create the
-  tables.
-- **Vercel**: import the repo, set `AUTH_SECRET`, `TURSO_DATABASE_URL`, and
-  `TURSO_AUTH_TOKEN` in the project settings, deploy.
+- **Vercel**: `vercel link` to create/link the project, then
+  `vercel integration add neon` to provision a Postgres database (creates a
+  separate branch + `DATABASE_URL` per environment automatically). Set
+  `AUTH_SECRET` with `vercel env add AUTH_SECRET production`, run
+  `npm run db:push` once against the prod `DATABASE_URL` to create the
+  tables, then `vercel --prod` to deploy.
 
 ## Data model so far
 

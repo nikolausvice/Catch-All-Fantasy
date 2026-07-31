@@ -1,7 +1,6 @@
 TODO:
     Venn Diagram
     Trade analyzer
-    League with bye week size issue
     Projections
     Probability factoring in possibility to win 
         multiple if theres a player you have that

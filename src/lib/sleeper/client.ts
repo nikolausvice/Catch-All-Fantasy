@@ -3,12 +3,16 @@ import type {
   SleeperMatchup,
   SleeperNflState,
   SleeperPlayersMap,
+  SleeperProjection,
   SleeperProjectionsMap,
   SleeperRoster,
   SleeperUser,
 } from "./types";
 
 const BASE_URL = "https://api.sleeper.app/v1";
+// Projections live outside the /v1 namespace and are shaped differently
+// (an array of per-player entries) from every other Sleeper endpoint.
+const PROJECTIONS_BASE_URL = "https://api.sleeper.app";
 
 class SleeperApiError extends Error {
   constructor(
@@ -111,10 +115,24 @@ export async function getSleeperProjections(
   year: string,
   week: number,
 ): Promise<SleeperProjectionsMap> {
-  return sleeperFetch<SleeperProjectionsMap>(
-    `/projections/nfl/${year}/${week}?season_type=regular`,
+  const res = await fetch(
+    `${PROJECTIONS_BASE_URL}/projections/nfl/${year}/${week}?season_type=regular`,
     { next: { revalidate: 1800 } },
   );
+
+  if (!res.ok) {
+    throw new SleeperApiError(
+      `Sleeper API request failed (${res.status}): /projections/nfl/${year}/${week}`,
+      res.status,
+    );
+  }
+
+  const entries = (await res.json()) as SleeperProjection[];
+  const map: SleeperProjectionsMap = {};
+  for (const entry of entries) {
+    map[entry.player_id] = entry;
+  }
+  return map;
 }
 
 /**

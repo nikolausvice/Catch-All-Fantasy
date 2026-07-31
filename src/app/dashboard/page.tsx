@@ -5,6 +5,7 @@ import { db } from "@/db/client";
 import { connectedLeagues } from "@/db/schema";
 import { AddLeagueSection } from "@/components/add-league-section";
 import { AvatarImage } from "@/components/avatar-image";
+import { computeMatchupWinProb } from "@/lib/leagues/cross-league";
 import { getCurrentNflWeek } from "@/lib/leagues/week";
 import { loadMatchup } from "./_load-matchup";
 import type { LeagueMatchup } from "@/lib/leagues/types";
@@ -21,12 +22,14 @@ function TeamScore({
   name,
   avatarUrl,
   score,
+  projectedScore,
   emphasized,
   reversed,
 }: {
   name: string;
   avatarUrl: string | null;
   score: number | null;
+  projectedScore?: number;
   emphasized?: boolean;
   reversed?: boolean;
 }) {
@@ -49,8 +52,24 @@ function TeamScore({
             }
           >
             {score.toFixed(1)}
+            {projectedScore != null && (
+              <span className="text-muted-foreground/50"> (proj {projectedScore.toFixed(1)})</span>
+            )}
           </p>
         )}
+      </div>
+    </div>
+  );
+}
+
+function ByePlaceholder({ reversed }: { reversed?: boolean }) {
+  return (
+    <div className={`flex min-w-0 flex-1 items-center gap-2 ${reversed ? "flex-row-reverse" : ""}`}>
+      <div className="flex size-8 shrink-0 items-center justify-center rounded-md bg-muted text-xs font-medium text-muted-foreground">
+        –
+      </div>
+      <div className={`min-w-0 ${reversed ? "text-right" : ""}`}>
+        <p className="truncate text-sm font-medium text-muted-foreground">Bye</p>
       </div>
     </div>
   );
@@ -85,6 +104,17 @@ function MatchupCard({
           : "tied"
       : null;
 
+  const winProb = computeMatchupWinProb(matchup);
+  const winPct = Math.round(winProb.winProbability * 100);
+  const winBarColor =
+    winPct >= 60 ? "bg-emerald-500" : winPct <= 40 ? "bg-red-500" : "bg-amber-400";
+  const winTextColor =
+    winPct >= 60
+      ? "text-emerald-500"
+      : winPct <= 40
+        ? "text-red-500"
+        : "text-amber-500";
+
   return (
     <Link
       href={`/dashboard/leagues/${league.id}`}
@@ -103,6 +133,7 @@ function MatchupCard({
           name={matchup.team.name}
           avatarUrl={matchup.team.avatarUrl}
           score={matchup.teamScore}
+          projectedScore={matchup.teamProjectedScore}
           emphasized
         />
         <span className="shrink-0 text-xs font-semibold uppercase text-muted-foreground">
@@ -113,29 +144,49 @@ function MatchupCard({
             name={matchup.opponent.name}
             avatarUrl={matchup.opponent.avatarUrl}
             score={matchup.opponentScore}
+            projectedScore={matchup.opponentProjectedScore}
             reversed
           />
         ) : (
-          <span className="shrink-0 text-xs text-muted-foreground">Bye</span>
+          <ByePlaceholder reversed />
         )}
       </div>
-      {result && (
-        <p
-          className={
-            result === "winning"
-              ? "mt-2 text-xs font-medium text-primary"
-              : result === "losing"
-                ? "mt-2 text-xs font-medium text-destructive"
-                : "mt-2 text-xs font-medium text-muted-foreground"
-          }
+      <div className="mt-3 flex items-center gap-2">
+        <div className="relative h-1.5 flex-1 overflow-hidden rounded-full bg-muted">
+          {!winProb.isBye && (
+            <div
+              className={`absolute inset-y-0 left-0 rounded-full transition-all ${winBarColor}`}
+              style={{ width: `${winPct}%` }}
+            />
+          )}
+        </div>
+        <span
+          className={`w-9 shrink-0 text-right text-xs font-bold tabular-nums ${
+            winProb.isBye ? "text-muted-foreground" : winTextColor
+          }`}
         >
-          {result === "winning"
-            ? "You're winning"
+          {winProb.isBye ? "Bye" : `${winPct}%`}
+        </span>
+      </div>
+      <p
+        className={
+          result === "winning"
+            ? "mt-2 text-xs font-medium text-primary"
             : result === "losing"
-              ? "You're behind"
-              : "Tied"}
-        </p>
-      )}
+              ? "mt-2 text-xs font-medium text-destructive"
+              : result === "tied"
+                ? "mt-2 text-xs font-medium text-muted-foreground"
+                : "mt-2 text-xs font-medium text-muted-foreground/0"
+        }
+      >
+        {result === "winning"
+          ? "You're winning"
+          : result === "losing"
+            ? "You're behind"
+            : result === "tied"
+              ? "Tied"
+              : " "}
+      </p>
     </Link>
   );
 }
@@ -161,27 +212,15 @@ export default async function DashboardPage() {
     })),
   );
 
-  const hasActiveMatchups = matchups.some((m) => m.matchup !== null);
-
   return (
     <div className="flex flex-col gap-8">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">
-            Your matchups
-          </h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Every league you&apos;re playing in, on one screen.
-          </p>
-        </div>
-        {hasActiveMatchups && (
-          <Link
-            href="/dashboard/intel"
-            className="shrink-0 rounded-lg border border-border bg-card px-4 py-2 text-sm font-semibold hover:bg-muted"
-          >
-            Cross-League Intel →
-          </Link>
-        )}
+      <div>
+        <h1 className="text-2xl font-semibold tracking-tight">
+          Your matchups
+        </h1>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Every league you&apos;re playing in, on one screen.
+        </p>
       </div>
 
       {leagues.length === 0 && (

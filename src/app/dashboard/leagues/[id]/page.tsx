@@ -7,6 +7,7 @@ import { connectedLeagues, platformIdentities } from "@/db/schema";
 import { decryptSecret } from "@/lib/crypto/secrets";
 import { EspnApiError } from "@/lib/espn/client";
 import { getCachedEspnTeamMatchup, getCachedSleeperTeamMatchup } from "@/lib/leagues/cache";
+import { computeMatchupWinProb } from "@/lib/leagues/cross-league";
 import { getCurrentNflWeek } from "@/lib/leagues/week";
 import { SleeperApiError } from "@/lib/sleeper/client";
 import { RefreshButton } from "@/components/refresh-button";
@@ -99,6 +100,19 @@ function TeamAvatar({
   );
 }
 
+// Compound flex-eligible slot names (e.g. ESPN's "RB/WR/TE") are too wide for
+// the fixed-width slot column — collapse them to the conventional "FLEX" label.
+const SLOT_DISPLAY: Record<string, string> = {
+  "RB/WR/TE": "FLEX",
+  "RB/WR": "FLEX",
+  "WR/TE": "FLEX",
+  "D/ST": "DST",
+};
+
+function slotLabel(slot: string): string {
+  return SLOT_DISPLAY[slot] ?? slot;
+}
+
 function PlayerList({
   players,
   title,
@@ -120,7 +134,7 @@ function PlayerList({
           >
             {player.slot && (
               <span className="w-10 shrink-0 text-[11px] font-semibold uppercase text-muted-foreground">
-                {player.slot}
+                {slotLabel(player.slot)}
               </span>
             )}
             <span className="min-w-0 flex-1 truncate">{player.name}</span>
@@ -175,6 +189,17 @@ export default async function LeagueDetailPage({
   if (!league.userTeamId) redirect(`/dashboard/leagues/${id}/select-team`);
 
   const { matchup, error } = await loadMatchup(league, userId);
+
+  const winProb = matchup ? computeMatchupWinProb(matchup) : null;
+  const winPct = winProb ? Math.round(winProb.winProbability * 100) : 0;
+  const winBarColor =
+    winPct >= 60 ? "bg-emerald-500" : winPct <= 40 ? "bg-red-500" : "bg-amber-400";
+  const winTextColor =
+    winPct >= 60
+      ? "text-emerald-500"
+      : winPct <= 40
+        ? "text-red-500"
+        : "text-amber-500";
 
   return (
     <div className="flex flex-col gap-6">
@@ -234,6 +259,11 @@ export default async function LeagueDetailPage({
               {matchup.teamScore != null && (
                 <p className="text-3xl font-bold tabular-nums">
                   {matchup.teamScore.toFixed(1)}
+                  {matchup.teamProjectedScore != null && (
+                    <span className="ml-1 text-xs font-normal text-muted-foreground">
+                      (proj {matchup.teamProjectedScore.toFixed(1)})
+                    </span>
+                  )}
                 </p>
               )}
               <p className="text-xs text-muted-foreground">
@@ -263,6 +293,11 @@ export default async function LeagueDetailPage({
                 {matchup.opponentScore != null && (
                   <p className="text-3xl font-bold tabular-nums">
                     {matchup.opponentScore.toFixed(1)}
+                    {matchup.opponentProjectedScore != null && (
+                      <span className="ml-1 text-xs font-normal text-muted-foreground">
+                        (proj {matchup.opponentProjectedScore.toFixed(1)})
+                      </span>
+                    )}
                   </p>
                 )}
                 <p className="text-xs text-muted-foreground">
@@ -270,11 +305,42 @@ export default async function LeagueDetailPage({
                 </p>
               </div>
             ) : (
-              <p className="text-right text-sm text-muted-foreground">
-                Bye week
-              </p>
+              <div className="flex flex-col items-end gap-1 text-right">
+                <p className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
+                  Opponent
+                </p>
+                <div className="flex items-center gap-2">
+                  <p className="truncate font-semibold text-muted-foreground">
+                    Bye week
+                  </p>
+                  <div className="flex size-9 shrink-0 items-center justify-center rounded-md bg-muted text-xs font-medium text-muted-foreground">
+                    –
+                  </div>
+                </div>
+                <p className="text-3xl font-bold tabular-nums text-muted-foreground/40">
+                  –
+                </p>
+                <p className="text-xs text-muted-foreground">&nbsp;</p>
+              </div>
             )}
           </div>
+
+          {winProb && !winProb.isBye && (
+            <div className="flex items-center gap-3 rounded-xl border border-border bg-card p-4">
+              <p className="shrink-0 text-xs font-semibold uppercase tracking-widest text-muted-foreground">
+                Win prob
+              </p>
+              <div className="relative h-1.5 flex-1 overflow-hidden rounded-full bg-muted">
+                <div
+                  className={`absolute inset-y-0 left-0 rounded-full transition-all ${winBarColor}`}
+                  style={{ width: `${winPct}%` }}
+                />
+              </div>
+              <span className={`w-10 shrink-0 text-right text-sm font-bold tabular-nums ${winTextColor}`}>
+                {winPct}%
+              </span>
+            </div>
+          )}
 
           {/* Roster panels */}
           <div className="grid gap-4 md:grid-cols-2">

@@ -116,6 +116,18 @@ export interface EspnBoxscorePlayer {
   fullName: string;
   rosteredPosition: string;
   totalPoints: number;
+  /** Sum of the per-category projected breakdown; undefined if ESPN didn't return one. */
+  projectedPoints?: number;
+}
+
+/** A stat-category → points breakdown sums to the player's total for that source. */
+function sumProjectedPoints(breakdown: Record<string, number> | undefined): number | undefined {
+  if (!breakdown) return undefined;
+  const values = Object.values(breakdown).filter(
+    (v): v is number => typeof v === "number" && Number.isFinite(v),
+  );
+  if (values.length === 0) return undefined;
+  return values.reduce((sum, v) => sum + v, 0);
 }
 
 export interface EspnBoxscoreSummary {
@@ -160,6 +172,7 @@ export async function getEspnBoxscoresForWeek({
         fullName: p.fullName,
         rosteredPosition: p.rosteredPosition,
         totalPoints: p.totalPoints ?? 0,
+        projectedPoints: sumProjectedPoints(p.projectedPointBreakdown),
       }));
     }
 

@@ -1,26 +1,12 @@
 {
   "version": "7",
-  "dialect": "sqlite",
+  "dialect": "postgresql",
   "entries": [
     {
       "idx": 0,
-      "version": "6",
-      "when": 1785446535729,
-      "tag": "0000_lucky_norman_osborn",
-      "breakpoints": true
-    },
-    {
-      "idx": 1,
-      "version": "6",
-      "when": 1785447873828,
-      "tag": "0001_steady_husk",
-      "breakpoints": true
-    },
-    {
-      "idx": 2,
-      "version": "6",
-      "when": 1785448658423,
-      "tag": "0002_young_devos",
+      "version": "7",
+      "when": 1785509669661,
+      "tag": "0000_awesome_patch",
       "breakpoints": true
     }
   ]

@@ -4,6 +4,7 @@ import { useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Check } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { AvatarImage } from "@/components/avatar-image";
 import type { LeagueTeamSummary } from "@/lib/leagues/types";
 import { setUserTeam } from "../actions";
 
@@ -40,14 +41,12 @@ export function TeamPickCard({
           : "border-border bg-card hover:bg-muted",
       )}
     >
-      {team.avatarUrl ? (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img src={team.avatarUrl} alt="" className="size-10 shrink-0 rounded-md" />
-      ) : (
-        <div className="flex size-10 shrink-0 items-center justify-center rounded-md bg-muted text-xs font-medium text-muted-foreground">
-          {team.name[0]?.toUpperCase() ?? "?"}
-        </div>
-      )}
+      <AvatarImage
+        name={team.name}
+        avatarUrl={team.avatarUrl}
+        className="size-10 shrink-0 rounded-md"
+        fallbackClassName="flex size-10 shrink-0 items-center justify-center rounded-md bg-muted text-xs font-medium text-muted-foreground"
+      />
       <div className="min-w-0 flex-1">
         <p className="truncate font-medium">{team.name}</p>
         <p className="text-xs text-muted-foreground">

@@ -14,7 +14,8 @@
   },
   "dependencies": {
     "@auth/drizzle-adapter": "^1.11.3",
-    "@libsql/client": "^0.17.4",
+    "@neondatabase/serverless": "^1.1.0",
+    "@vercel/functions": "^3.7.6",
     "bcryptjs": "^3.0.3",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",

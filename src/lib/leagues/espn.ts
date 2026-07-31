@@ -49,6 +49,7 @@ function buildEspnTeamFromBoxscore(
       isStarter: !isBench,
       slot: slot || undefined,
       points: p.totalPoints,
+      projectedPoints: p.projectedPoints,
     };
     if (isBench) {
       bench.push(entry);

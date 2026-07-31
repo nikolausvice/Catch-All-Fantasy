@@ -1,17 +1,52 @@
 import Link from "next/link";
+import { Fragment } from "react";
 import { desc, eq } from "drizzle-orm";
 import { auth } from "@/auth";
 import { db } from "@/db/client";
 import { connectedLeagues } from "@/db/schema";
+import { IntelTabs } from "@/components/intel-tabs";
 import { RefreshButton } from "@/components/refresh-button";
+import { StillPlayingSection } from "@/components/still-playing-section";
+import { VennExplorer } from "@/components/venn-diagram";
+import type { VennComboInfo, VennSetInfo } from "@/components/venn-diagram";
 import { analyzeCrossLeague } from "@/lib/leagues/cross-league";
+import {
+  buildRosterSets,
+  computeOverlapCombos,
+  type LeagueRosterSet,
+} from "@/lib/leagues/roster-overlap";
 import { getCurrentNflWeek } from "@/lib/leagues/week";
 import { loadMatchup } from "../_load-matchup";
-import type {
-  CrossLeaguePlayer,
-  LeagueWinProb,
-  RemainingPlayerAnalysis,
-} from "@/lib/leagues/cross-league";
+import type { CrossLeaguePlayer, LeagueWinProb } from "@/lib/leagues/cross-league";
+
+const MAX_OVERLAP_LEAGUES = 10;
+
+function toOverlapViewData(rosterSets: LeagueRosterSet[]): {
+  sets: VennSetInfo[];
+  combos: VennComboInfo[];
+} {
+  const used =
+    rosterSets.length > MAX_OVERLAP_LEAGUES
+      ? rosterSets.slice(0, MAX_OVERLAP_LEAGUES)
+      : rosterSets;
+
+  const combos = computeOverlapCombos(used).map((combo) => ({
+    leagueIds: combo.leagueIds,
+    players: combo.playerIds.map((id) => {
+      const owner = used.find((s) => s.playerIds.has(id))!;
+      const info = owner.players.get(id)!;
+      return { id, name: info.name, position: info.position };
+    }),
+  }));
+
+  const sets = used.map((s) => ({
+    leagueId: s.leagueId,
+    leagueName: s.leagueName,
+    size: s.playerIds.size,
+  }));
+
+  return { sets, combos };
+}
 
 // ── Win probability row ────────────────────────────────────────────────────
 
@@ -27,10 +62,15 @@ function WinProbRow({ w }: { w: LeagueWinProb }) {
         : "text-amber-500";
 
   return (
-    <div className="flex items-center gap-3 py-3">
+    <Link
+      href={`/dashboard/leagues/${w.leagueId}`}
+      className="flex items-center gap-3 py-3 transition-colors hover:bg-muted/50"
+    >
       <div className="min-w-0 flex-1">
         <p className="truncate text-sm font-medium">{w.leagueName}</p>
-        {!w.isBye && (
+        {w.isBye ? (
+          <p className="mt-0.5 text-xs text-muted-foreground">No opponent this week</p>
+        ) : (
           <p className="mt-0.5 text-xs tabular-nums text-muted-foreground">
             {w.teamScore?.toFixed(1) ?? "0.0"} –{" "}
             {w.opponentScore?.toFixed(1) ?? "0.0"}
@@ -45,7 +85,12 @@ function WinProbRow({ w }: { w: LeagueWinProb }) {
         )}
       </div>
       {w.isBye ? (
-        <span className="shrink-0 text-xs text-muted-foreground">Bye</span>
+        <>
+          <div className="relative h-1.5 w-20 shrink-0 overflow-hidden rounded-full bg-muted" />
+          <span className="w-9 shrink-0 text-right text-sm font-bold tabular-nums text-muted-foreground">
+            Bye
+          </span>
+        </>
       ) : (
         <>
           <div className="relative h-1.5 w-20 shrink-0 overflow-hidden rounded-full bg-muted">
@@ -61,94 +106,7 @@ function WinProbRow({ w }: { w: LeagueWinProb }) {
           </span>
         </>
       )}
-    </div>
-  );
-}
-
-// ── Remaining player card ──────────────────────────────────────────────────
-
-function RemainingCard({ p }: { p: RemainingPlayerAnalysis }) {
-  const yourLeagues = p.leagues.filter((l) => l.role === "your-starter");
-  const oppLeagues = p.leagues.filter((l) => l.role === "opp-starter");
-
-  return (
-    <div
-      className={`rounded-xl border p-4 ${
-        p.hasConflict
-          ? "border-amber-500/30 bg-amber-500/5"
-          : "border-border bg-card"
-      }`}
-    >
-      <div className="mb-3 flex items-start justify-between gap-3">
-        <div>
-          <p className="font-semibold">{p.name}</p>
-          <p className="text-xs text-muted-foreground">
-            {[p.position, p.proTeam].filter(Boolean).join(" · ")}
-          </p>
-        </div>
-        <div className="shrink-0 text-right">
-          <p className="text-lg font-bold tabular-nums">
-            {p.projectedPoints.toFixed(1)}
-          </p>
-          <p className="text-[10px] text-muted-foreground">proj pts</p>
-        </div>
-      </div>
-
-      <div className="mb-3 flex flex-wrap gap-1.5">
-        {yourLeagues.map((l) => (
-          <span
-            key={l.leagueId}
-            className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-[11px] font-semibold text-primary"
-          >
-            ↑ {l.leagueName}
-          </span>
-        ))}
-        {oppLeagues.map((l) => (
-          <span
-            key={l.leagueId}
-            className="inline-flex items-center gap-1 rounded-full bg-destructive/10 px-2 py-0.5 text-[11px] font-semibold text-destructive"
-          >
-            ↓ {l.leagueName}
-          </span>
-        ))}
-      </div>
-
-      {p.hasConflict ? (
-        <div className="rounded-lg bg-muted/50 px-3 py-2 text-sm">
-          {p.sweetSpot ? (
-            <>
-              <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                Sweet spot{" "}
-              </span>
-              <span className="font-bold text-primary">
-                {p.sweetSpot.min.toFixed(1)}–{p.sweetSpot.max.toFixed(1)} pts
-              </span>
-            </>
-          ) : (
-            <span className="text-xs font-semibold text-destructive">
-              No sweet spot — any score helps one league and hurts another.
-            </span>
-          )}
-        </div>
-      ) : yourLeagues.length > 0 ? (
-        <p className="text-xs text-muted-foreground">
-          {yourLeagues[0].winningWithout
-            ? "Winning even if they score 0"
-            : yourLeagues[0].breakEvenPoints != null &&
-                yourLeagues[0].breakEvenPoints > 0
-              ? `Needs ~${yourLeagues[0].breakEvenPoints.toFixed(1)} pts to clinch`
-              : "Any score helps"}
-        </p>
-      ) : oppLeagues.length > 0 ? (
-        <p className="text-xs text-muted-foreground">
-          {oppLeagues[0].winningWithout
-            ? "You're winning even at their projection"
-            : oppLeagues[0].breakEvenPoints != null
-              ? `Must score under ${oppLeagues[0].breakEvenPoints.toFixed(1)} pts for you to win`
-              : "Keep an eye on this one"}
-        </p>
-      ) : null}
-    </div>
+    </Link>
   );
 }
 
@@ -314,8 +272,12 @@ export default async function IntelPage() {
     })),
   );
 
+  const overlapOwn = toOverlapViewData(buildRosterSets(matchups, "own"));
+  const overlapOpponent = toOverlapViewData(buildRosterSets(matchups, "opponent"));
+
   const hasData = analysis.winProbabilities.length > 0;
   const sweepPct = Math.round(analysis.probAllWins * 100);
+  const failedLeagues = matchups.filter((m) => m.error);
 
   return (
     <div className="flex flex-col gap-8">
@@ -333,6 +295,23 @@ export default async function IntelPage() {
         </div>
       </div>
 
+      {failedLeagues.length > 0 && (
+        <div className="rounded-xl border border-destructive/30 bg-destructive/10 p-4 text-sm text-destructive">
+          <p className="font-medium">
+            {failedLeagues.length === 1
+              ? "1 league couldn't be loaded and is excluded below:"
+              : `${failedLeagues.length} leagues couldn't be loaded and are excluded below:`}
+          </p>
+          <ul className="mt-1.5 list-inside list-disc">
+            {failedLeagues.map((m) => (
+              <li key={m.leagueId}>
+                {m.leagueName} — {m.error}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
       {!hasData && (
         <div className="rounded-xl border border-dashed border-border p-8 text-center text-sm text-muted-foreground">
           No active matchups found. Finish setting up your leagues on the
@@ -341,62 +320,60 @@ export default async function IntelPage() {
       )}
 
       {hasData && (
-        <>
-          {/* Hero stats */}
-          {analysis.totalMatchups > 1 && (
-            <div className="grid grid-cols-2 gap-3">
-              <div className="rounded-xl border border-border bg-card p-5 text-center">
-                <p
-                  className={`text-4xl font-bold tabular-nums ${
-                    sweepPct >= 50 ? "text-emerald-500" : "text-red-500"
-                  }`}
-                >
-                  {sweepPct}%
-                </p>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  sweep all {analysis.totalMatchups}
-                </p>
-              </div>
-              <div className="rounded-xl border border-border bg-card p-5 text-center">
-                <p className="text-4xl font-bold tabular-nums">
-                  {analysis.expectedWins.toFixed(1)}
-                </p>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  expected wins
-                </p>
-              </div>
-            </div>
-          )}
+        <IntelTabs
+          stillPlayingCount={analysis.remainingPlayers.length}
+          overview={
+            <Fragment key="overview">
+              {/* Hero stats */}
+              {analysis.totalMatchups > 1 && (
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="rounded-xl border border-border bg-card p-5 text-center">
+                    <p
+                      className={`text-4xl font-bold tabular-nums ${
+                        sweepPct >= 50 ? "text-emerald-500" : "text-red-500"
+                      }`}
+                    >
+                      {sweepPct}%
+                    </p>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      sweep all {analysis.totalMatchups}
+                    </p>
+                  </div>
+                  <div className="rounded-xl border border-border bg-card p-5 text-center">
+                    <p className="text-4xl font-bold tabular-nums">
+                      {analysis.expectedWins.toFixed(1)}
+                    </p>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      expected wins
+                    </p>
+                  </div>
+                </div>
+              )}
 
-          {/* Win probability */}
-          <section className="flex flex-col gap-3">
-            <h2 className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
-              Win Probability
-            </h2>
-            <div className="flex flex-col divide-y divide-border rounded-xl border border-border bg-card px-4">
-              {analysis.winProbabilities.map((w) => (
-                <WinProbRow key={w.leagueId} w={w} />
-              ))}
-            </div>
-          </section>
-
-          {/* Still playing */}
-          {analysis.remainingPlayers.length > 0 && (
-            <section className="flex flex-col gap-3">
-              <h2 className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
-                Still Playing
-              </h2>
-              <div className="flex flex-col gap-3">
-                {analysis.remainingPlayers.map((p) => (
-                  <RemainingCard key={p.playerId} p={p} />
-                ))}
-              </div>
-            </section>
-          )}
-
-          {/* Rooting guide */}
-          <RootingGuide playerImpacts={analysis.playerImpacts} />
-        </>
+              {/* Win probability */}
+              <section className="flex flex-col gap-3">
+                <h2 className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
+                  Win Probability
+                </h2>
+                <div className="flex flex-col divide-y divide-border rounded-xl border border-border bg-card px-4">
+                  {analysis.winProbabilities.map((w) => (
+                    <WinProbRow key={w.leagueId} w={w} />
+                  ))}
+                </div>
+              </section>
+            </Fragment>
+          }
+          stillPlaying={<StillPlayingSection players={analysis.remainingPlayers} />}
+          rootingGuide={<RootingGuide playerImpacts={analysis.playerImpacts} />}
+          leagueOverlap={
+            <VennExplorer
+              ownSets={overlapOwn.sets}
+              ownCombos={overlapOwn.combos}
+              opponentSets={overlapOpponent.sets}
+              opponentCombos={overlapOpponent.combos}
+            />
+          }
+        />
       )}
     </div>
   );

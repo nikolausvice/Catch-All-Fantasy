@@ -117,6 +117,54 @@ function logisticProb(margin: number, scale = 15): number {
   return 1 / (1 + Math.exp(-margin / scale));
 }
 
+/**
+ * Win probability for a single matchup, based on projected final margin
+ * when available, current score margin otherwise.
+ */
+export function computeMatchupWinProb(matchup: LeagueMatchup): {
+  currentMargin: number | null;
+  projectedMargin: number | null;
+  winProbability: number;
+  isBye: boolean;
+} {
+  const isBye = matchup.opponent === null;
+
+  const currentMargin =
+    matchup.teamScore != null && matchup.opponentScore != null
+      ? matchup.teamScore - matchup.opponentScore
+      : null;
+
+  const projectedMargin =
+    matchup.teamProjectedScore != null && matchup.opponentProjectedScore != null
+      ? matchup.teamProjectedScore - matchup.opponentProjectedScore
+      : null;
+
+  let winProbability: number;
+  if (isBye) {
+    winProbability = 1;
+  } else if (projectedMargin != null) {
+    // Tighter scale (10) since projections are more confident than live scores alone
+    winProbability = logisticProb(projectedMargin, 10);
+  } else if (currentMargin != null) {
+    winProbability = logisticProb(currentMargin, 15);
+  } else {
+    winProbability = 0.5;
+  }
+
+  return { currentMargin, projectedMargin, winProbability, isBye };
+}
+
+/**
+ * Sleeper and ESPN each hand out their own small-integer player IDs, drawn
+ * from unrelated ID spaces — a Sleeper ID and an ESPN ID can collide despite
+ * referring to two different real players. Namespacing by platform keeps a
+ * Sleeper league's player entries from being silently merged into (and
+ * masked by) an unrelated ESPN player with the same raw ID, and vice versa.
+ */
+function playerKey(platform: string, playerId: string): string {
+  return `${platform}:${playerId}`;
+}
+
 function isRemaining(p: LeagueTeamPlayer): boolean {
   return (
     p.isStarter &&
@@ -144,29 +192,8 @@ export function analyzeCrossLeague(
   for (const { leagueId, leagueName, platform, matchup } of matchupResults) {
     if (!matchup) continue;
 
-    const isBye = matchup.opponent === null;
-
-    const currentMargin =
-      matchup.teamScore != null && matchup.opponentScore != null
-        ? matchup.teamScore - matchup.opponentScore
-        : null;
-
-    const projectedMargin =
-      matchup.teamProjectedScore != null && matchup.opponentProjectedScore != null
-        ? matchup.teamProjectedScore - matchup.opponentProjectedScore
-        : null;
-
-    let winProbability: number;
-    if (isBye) {
-      winProbability = 1;
-    } else if (projectedMargin != null) {
-      // Tighter scale (10) since projections are more confident than live scores alone
-      winProbability = logisticProb(projectedMargin, 10);
-    } else if (currentMargin != null) {
-      winProbability = logisticProb(currentMargin, 15);
-    } else {
-      winProbability = 0.5;
-    }
+    const { currentMargin, projectedMargin, winProbability, isBye } =
+      computeMatchupWinProb(matchup);
 
     winProbabilities.push({
       leagueId,
@@ -192,11 +219,13 @@ export function analyzeCrossLeague(
     role: PlayerLeagueRole["role"],
     leagueId: string,
     leagueName: string,
+    platform: string,
   ) {
-    let entry = playerMap.get(player.id);
+    const key = playerKey(platform, player.id);
+    let entry = playerMap.get(key);
     if (!entry) {
       entry = {
-        playerId: player.id,
+        playerId: key,
         name: player.name,
         position: player.position,
         proTeam: player.proTeam,
@@ -204,7 +233,7 @@ export function analyzeCrossLeague(
         netImpact: 0,
         isYourStarter: false,
       };
-      playerMap.set(player.id, entry);
+      playerMap.set(key, entry);
     }
 
     entry.leagues.push({
@@ -240,14 +269,14 @@ export function analyzeCrossLeague(
     entry.netImpact += delta;
   }
 
-  for (const { leagueId, leagueName, matchup } of matchupResults) {
+  for (const { leagueId, leagueName, platform, matchup } of matchupResults) {
     if (!matchup) continue;
     for (const p of matchup.team.players) {
-      upsert(p, p.isStarter ? "your-starter" : "your-bench", leagueId, leagueName);
+      upsert(p, p.isStarter ? "your-starter" : "your-bench", leagueId, leagueName, platform);
     }
     if (matchup.opponent) {
       for (const p of matchup.opponent.players) {
-        upsert(p, p.isStarter ? "opp-starter" : "opp-bench", leagueId, leagueName);
+        upsert(p, p.isStarter ? "opp-starter" : "opp-bench", leagueId, leagueName, platform);
       }
     }
   }
@@ -289,7 +318,7 @@ export function analyzeCrossLeague(
   // Collect all remaining starters that appear in a meaningful role
   const remainingByPlayer = new Map<string, RemainingPlayerAnalysis>();
 
-  for (const { leagueId, leagueName, matchup } of matchupResults) {
+  for (const { leagueId, leagueName, platform, matchup } of matchupResults) {
     if (!matchup || !matchup.opponent) continue;
     const proj = leagueProjData.get(leagueId);
     if (!proj) continue;
@@ -298,6 +327,7 @@ export function analyzeCrossLeague(
     for (const player of matchup.team.players) {
       if (!isRemaining(player)) continue;
       const pProj = player.projectedPoints!;
+      const key = playerKey(platform, player.id);
 
       // My projected without this player
       const myWithout = proj.myProj - pProj;
@@ -311,10 +341,10 @@ export function analyzeCrossLeague(
         ? `${player.name} needs ~${breakEven.toFixed(1)} pts to secure the W`
         : `Already covered — any score helps`;
 
-      let entry = remainingByPlayer.get(player.id);
+      let entry = remainingByPlayer.get(key);
       if (!entry) {
         entry = {
-          playerId: player.id,
+          playerId: key,
           name: player.name,
           position: player.position,
           proTeam: player.proTeam,
@@ -323,7 +353,7 @@ export function analyzeCrossLeague(
           hasConflict: false,
           sweetSpot: null,
         };
-        remainingByPlayer.set(player.id, entry);
+        remainingByPlayer.set(key, entry);
       }
       // Update to highest projection seen
       if (pProj > entry.projectedPoints) entry.projectedPoints = pProj;
@@ -343,6 +373,7 @@ export function analyzeCrossLeague(
       for (const player of matchup.opponent.players) {
         if (!isRemaining(player)) continue;
         const pProj = player.projectedPoints!;
+        const key = playerKey(platform, player.id);
 
         // Opp projected without this player
         const oppWithout = proj.oppProj - pProj;
@@ -357,10 +388,10 @@ export function analyzeCrossLeague(
           ? `${player.name} must score under ${maxAllowed.toFixed(1)} pts for you to win`
           : `Opponent wins even if ${player.name} scores 0`;
 
-        let entry = remainingByPlayer.get(player.id);
+        let entry = remainingByPlayer.get(key);
         if (!entry) {
           entry = {
-            playerId: player.id,
+            playerId: key,
             name: player.name,
             position: player.position,
             proTeam: player.proTeam,
@@ -369,7 +400,7 @@ export function analyzeCrossLeague(
             hasConflict: false,
             sweetSpot: null,
           };
-          remainingByPlayer.set(player.id, entry);
+          remainingByPlayer.set(key, entry);
         }
         if (pProj > entry.projectedPoints) entry.projectedPoints = pProj;
 

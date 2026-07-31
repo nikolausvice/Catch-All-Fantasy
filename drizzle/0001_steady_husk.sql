@@ -1,1 +1,0 @@
-ALTER TABLE `platform_identities` ADD `encryptedSecret` text;

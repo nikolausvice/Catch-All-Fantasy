@@ -1,13 +1,9 @@
-import { createClient } from "@libsql/client";
-import { drizzle } from "drizzle-orm/libsql";
+import { neon } from "@neondatabase/serverless";
+import { drizzle } from "drizzle-orm/neon-http";
 import * as schema from "./schema";
 
-// Locally this points at a file on disk (no Turso account needed).
-// In prod, set TURSO_DATABASE_URL/TURSO_AUTH_TOKEN to a Turso database and
-// the exact same client + schema work unchanged.
-const libsql = createClient({
-  url: process.env.TURSO_DATABASE_URL || "file:./local.db",
-  authToken: process.env.TURSO_AUTH_TOKEN || undefined,
-});
+// DATABASE_URL points at the Neon Postgres database provisioned via the
+// Vercel-Neon integration, pulled locally with `vercel env pull`.
+const sql = neon(process.env.DATABASE_URL!);
 
-export const db = drizzle(libsql, { schema });
+export const db = drizzle(sql, { schema });

@@ -45,6 +45,12 @@ declare module "espn-fantasy-football-api/node" {
     rosteredPosition: string;
     /** Actual fantasy points scored this week. */
     totalPoints: number;
+    /**
+     * Per-stat-category projected fantasy points (e.g. `{ passingYards: 8.2,
+     * receivingTouchdowns: 6 }`) for this scoring period. Sum for a total
+     * projected-points estimate; undefined categories aren't present.
+     */
+    projectedPointBreakdown?: Record<string, number>;
   }
 
   interface EspnBoxscore {

@@ -1,28 +1,29 @@
 import {
   integer,
+  pgTable,
   primaryKey,
-  sqliteTable,
   text,
+  timestamp,
   uniqueIndex,
-} from "drizzle-orm/sqlite-core";
+} from "drizzle-orm/pg-core";
 import type { AdapterAccountType } from "next-auth/adapters";
 
-export const users = sqliteTable("user", {
+export const users = pgTable("user", {
   id: text("id")
     .primaryKey()
     .$defaultFn(() => crypto.randomUUID()),
   name: text("name"),
   email: text("email").notNull().unique(),
-  emailVerified: integer("emailVerified", { mode: "timestamp_ms" }),
+  emailVerified: timestamp("emailVerified", { mode: "date" }),
   image: text("image"),
   /** Only set for credentials-based accounts; null for OAuth-only users. */
   passwordHash: text("passwordHash"),
-  createdAt: integer("createdAt", { mode: "timestamp_ms" })
+  createdAt: timestamp("createdAt", { mode: "date" })
     .notNull()
     .$defaultFn(() => new Date()),
 });
 
-export const accounts = sqliteTable(
+export const accounts = pgTable(
   "account",
   {
     userId: text("userId")
@@ -44,25 +45,25 @@ export const accounts = sqliteTable(
   ],
 );
 
-export const sessions = sqliteTable("session", {
+export const sessions = pgTable("session", {
   sessionToken: text("sessionToken").primaryKey(),
   userId: text("userId")
     .notNull()
     .references(() => users.id, { onDelete: "cascade" }),
-  expires: integer("expires", { mode: "timestamp_ms" }).notNull(),
+  expires: timestamp("expires", { mode: "date" }).notNull(),
 });
 
-export const verificationTokens = sqliteTable(
+export const verificationTokens = pgTable(
   "verificationToken",
   {
     identifier: text("identifier").notNull(),
     token: text("token").notNull(),
-    expires: integer("expires", { mode: "timestamp_ms" }).notNull(),
+    expires: timestamp("expires", { mode: "date" }).notNull(),
   },
   (vt) => [primaryKey({ columns: [vt.identifier, vt.token] })],
 );
 
-export const platformIdentities = sqliteTable(
+export const platformIdentities = pgTable(
   "platform_identities",
   {
     id: text("id")
@@ -78,7 +79,7 @@ export const platformIdentities = sqliteTable(
     platformUsername: text("platformUsername"),
     /** Encrypted credential material (e.g. ESPN's espn_s2 cookie). Never stored in plaintext. */
     encryptedSecret: text("encryptedSecret"),
-    createdAt: integer("createdAt", { mode: "timestamp_ms" })
+    createdAt: timestamp("createdAt", { mode: "date" })
       .notNull()
       .$defaultFn(() => new Date()),
   },
@@ -91,7 +92,7 @@ export const platformIdentities = sqliteTable(
   ],
 );
 
-export const connectedLeagues = sqliteTable(
+export const connectedLeagues = pgTable(
   "connected_leagues",
   {
     id: text("id")
@@ -113,7 +114,7 @@ export const connectedLeagues = sqliteTable(
     userTeamId: text("userTeamId"),
     /** Denormalized so the dashboard can show it without refetching from the platform. */
     userTeamName: text("userTeamName"),
-    createdAt: integer("createdAt", { mode: "timestamp_ms" })
+    createdAt: timestamp("createdAt", { mode: "date" })
       .notNull()
       .$defaultFn(() => new Date()),
   },

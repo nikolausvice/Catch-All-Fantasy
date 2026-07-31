@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { auth } from "@/auth";
+import { DashboardTabs } from "@/components/dashboard-tabs";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { requireSessionUserId } from "@/lib/auth/require-user";
 import { signOut } from "../(auth)/actions";
@@ -44,6 +45,7 @@ export default async function DashboardLayout({
           </div>
         </div>
       </header>
+      <DashboardTabs />
       <main className="mx-auto w-full max-w-5xl flex-1 px-4 py-6 sm:py-8">
         {children}
       </main>
