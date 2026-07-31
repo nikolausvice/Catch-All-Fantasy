@@ -150,20 +150,27 @@ export async function getEspnTeamMatchup({
   );
 
   if (!box) {
-    // Bye week — return team with roster from rawTeams (no boxscore data)
+    // Bye week — no boxscore exists this week, so there's no way to recover
+    // which slot each player actually started in. Best we can do is present
+    // the roster in the league's normal position order (QB, RB, WR, TE,
+    // FLEX, D/ST, K, ...) instead of whatever arbitrary order the season
+    // roster endpoint happens to return, so it doesn't look shuffled.
     const summary = teamSummaries.get(numericTeamId);
     if (!summary) throw new Error(`No ESPN team ${teamId} found in league ${leagueId}.`);
     const raw = rawTeams.find((t) => t.id === numericTeamId);
-    const team: LeagueTeam = {
-      ...summary,
-      players: (raw?.roster ?? []).map((p) => ({
+    const players = (raw?.roster ?? [])
+      .map((p) => ({
         id: String(p.id),
         name: p.fullName,
         position: p.defaultPosition,
         proTeam: p.proTeamAbbreviation,
         isStarter: false,
-      })),
-    };
+      }))
+      .sort(
+        (a, b) =>
+          (SLOT_ORDER[a.position ?? ""] ?? 98) - (SLOT_ORDER[b.position ?? ""] ?? 98),
+      );
+    const team: LeagueTeam = { ...summary, players };
     return { week: period, team, opponent: null, teamScore: null, opponentScore: null };
   }
 

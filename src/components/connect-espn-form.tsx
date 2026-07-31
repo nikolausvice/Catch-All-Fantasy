@@ -5,7 +5,7 @@ import { connectEspnAccount } from "@/app/dashboard/actions";
 
 const currentYear = new Date().getFullYear();
 
-export function ConnectEspnForm() {
+export function ConnectEspnForm({ hasStoredCookies }: { hasStoredCookies: boolean }) {
   const [state, formAction, pending] = useActionState(connectEspnAccount, {
     error: null,
     success: null,
@@ -56,8 +56,9 @@ export function ConnectEspnForm() {
           Private leagues only
         </legend>
         <p className="mb-3 text-xs text-muted-foreground">
-          Skip these two fields if your league is public. Most leagues are
-          private by default, so you&apos;ll usually need them.
+          {hasStoredCookies
+            ? "Skip these — we'll reuse the espn_s2/SWID from your last ESPN league. Only fill them in if you need to update your saved login."
+            : "Skip these two fields if your league is public. Most leagues are private by default, so you'll usually need them."}
         </p>
         <div className="grid gap-3 sm:grid-cols-2">
           <div className="flex flex-col gap-1.5">

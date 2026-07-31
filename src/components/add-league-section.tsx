@@ -19,7 +19,7 @@ const PLATFORMS: { id: Platform; label: string; description: string }[] = [
   },
 ];
 
-export function AddLeagueSection() {
+export function AddLeagueSection({ hasStoredEspnCookies }: { hasStoredEspnCookies: boolean }) {
   const [selected, setSelected] = useState<Platform | null>(null);
 
   return (
@@ -73,10 +73,11 @@ export function AddLeagueSection() {
               <div>
                 <h3 className="mb-1 text-sm font-semibold">Connect ESPN</h3>
                 <p className="mb-4 text-sm text-muted-foreground">
-                  League ID and season are enough for public leagues; private
-                  leagues also need the espn_s2 and SWID cookies.
+                  {hasStoredEspnCookies
+                    ? "League ID and season are all you need — we'll reuse your saved ESPN login for private leagues."
+                    : "League ID and season are enough for public leagues; private leagues also need the espn_s2 and SWID cookies."}
                 </p>
-                <ConnectEspnForm />
+                <ConnectEspnForm hasStoredCookies={hasStoredEspnCookies} />
               </div>
             )}
           </div>

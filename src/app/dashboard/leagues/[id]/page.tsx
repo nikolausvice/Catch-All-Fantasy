@@ -201,54 +201,64 @@ function pairRosters(mine: LeagueTeamPlayer[], theirs: LeagueTeamPlayer[]): Rost
   return rows;
 }
 
-function PlayerSide({
+// Fixed 5-column template shared by the header and every row, so the two
+// point columns and the slot spine land in exactly the same place on every
+// line regardless of name length — that's what makes it read as "aligned."
+const ROSTER_GRID_COLS = "grid-cols-[2.5rem_1fr_2.75rem_1fr_2.5rem]";
+
+// Subtle per-position tint so the eye can group QB/RB/WR/etc. rows at a
+// glance. Keyed by the post-slotLabel display name (FLEX/DST already
+// collapsed). Deliberately low-opacity so it holds up in both themes.
+const POSITION_SHADE: Record<string, string> = {
+  QB: "bg-blue-500/5",
+  RB: "bg-emerald-500/5",
+  WR: "bg-amber-500/5",
+  TE: "bg-violet-500/5",
+  FLEX: "bg-cyan-500/5",
+  SUPER_FLEX: "bg-cyan-500/5",
+  DST: "bg-red-500/5",
+  DEF: "bg-red-500/5",
+  K: "bg-orange-500/5",
+};
+
+function slotShade(slot: string | null): string {
+  if (!slot) return "";
+  return POSITION_SHADE[slotLabel(slot)] ?? "";
+}
+
+function PlayerName({
   player,
   align,
 }: {
   player: LeagueTeamPlayer | undefined;
   align: "left" | "right";
 }) {
-  const isRight = align === "right";
-
   if (!player) {
     return (
-      <div className={`flex min-w-0 ${isRight ? "justify-end" : ""}`}>
-        <span className="text-sm text-muted-foreground/40">—</span>
-      </div>
+      <p className={`truncate text-sm text-muted-foreground/40 ${align === "right" ? "text-right" : ""}`}>
+        —
+      </p>
     );
   }
-
-  const nameBlock = (
-    <div className={`min-w-0 ${isRight ? "text-right" : ""}`}>
-      <p className="truncate text-sm font-medium">{player.name}</p>
-      <p className="truncate text-[11px] text-muted-foreground">
-        {[player.position, player.proTeam].filter(Boolean).join(" · ")}
-      </p>
-    </div>
-  );
-  const pointsBadge =
-    player.points !== undefined ? (
-      <span className="w-9 shrink-0 text-center text-xs font-semibold tabular-nums">
-        {player.points.toFixed(1)}
-      </span>
-    ) : (
-      <span className="w-9 shrink-0" />
-    );
-
   return (
-    <div className={`flex min-w-0 items-center gap-2 ${isRight ? "justify-end" : ""}`}>
-      {isRight ? (
-        <>
-          {pointsBadge}
-          {nameBlock}
-        </>
-      ) : (
-        <>
-          {nameBlock}
-          {pointsBadge}
-        </>
+    <div className={`min-w-0 ${align === "right" ? "text-right" : ""}`}>
+      <p className="truncate text-sm font-medium">{player.name}</p>
+      {player.proTeam && (
+        <p className="truncate text-[11px] text-muted-foreground">{player.proTeam}</p>
       )}
     </div>
+  );
+}
+
+function PointsCell({ player, align }: { player: LeagueTeamPlayer | undefined; align: "left" | "right" }) {
+  return (
+    <span
+      className={`shrink-0 text-xs font-semibold tabular-nums text-muted-foreground ${
+        align === "right" ? "text-right" : "text-left"
+      }`}
+    >
+      {player?.points !== undefined ? player.points.toFixed(1) : ""}
+    </span>
   );
 }
 
@@ -256,23 +266,25 @@ function MirroredRoster({ team, opponent }: { team: LeagueTeam; opponent: League
   const rows = pairRosters(team.players, opponent.players);
 
   return (
-    <div className="rounded-xl border border-border bg-card p-4">
-      <div className="mb-3 grid grid-cols-[1fr_2.75rem_1fr] items-center gap-2">
-        <p className="truncate text-right text-sm font-semibold">{team.name}</p>
+    <div className="overflow-hidden rounded-xl border border-border bg-card">
+      <div className={`grid ${ROSTER_GRID_COLS} items-center gap-2 border-b border-border px-3 py-2.5`}>
+        <p className="col-span-2 truncate text-right text-sm font-semibold">{team.name}</p>
         <span />
-        <p className="truncate text-sm font-semibold">{opponent.name}</p>
+        <p className="col-span-2 truncate text-sm font-semibold">{opponent.name}</p>
       </div>
       <div className="flex flex-col">
         {rows.map((row, i) => (
           <div
             key={i}
-            className="grid grid-cols-[1fr_2.75rem_1fr] items-center gap-2 border-b border-border/50 py-2 last:border-0"
+            className={`grid ${ROSTER_GRID_COLS} items-center gap-2 border-b border-border/40 px-3 py-2 last:border-0 ${slotShade(row.slot)}`}
           >
-            <PlayerSide player={row.mine} align="right" />
-            <span className="shrink-0 text-center text-[10px] font-semibold uppercase text-muted-foreground">
+            <PointsCell player={row.mine} align="right" />
+            <PlayerName player={row.mine} align="right" />
+            <span className="text-center text-[10px] font-semibold uppercase text-muted-foreground">
               {row.slot ? slotLabel(row.slot) : ""}
             </span>
-            <PlayerSide player={row.theirs} align="left" />
+            <PlayerName player={row.theirs} align="left" />
+            <PointsCell player={row.theirs} align="left" />
           </div>
         ))}
       </div>

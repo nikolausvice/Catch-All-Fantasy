@@ -1,7 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { auth } from "@/auth";
-import { DashboardTabs } from "@/components/dashboard-tabs";
 import { RefreshButton } from "@/components/refresh-button";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { requireSessionUserId } from "@/lib/auth/require-user";
@@ -17,9 +16,12 @@ export default async function DashboardLayout({
 
   // A session's JWT can outlive the user row it points to (e.g. the DB was
   // reset). Catch that here rather than letting every page/action underneath
-  // hit a foreign-key crash on first write.
+  // hit a foreign-key crash on first write. Redirect to /clear-session (not
+  // /login directly) so the stale cookie actually gets cleared — otherwise
+  // the still-valid-looking JWT makes the proxy/middleware bounce this
+  // request straight back to /dashboard, looping forever.
   const userId = await requireSessionUserId();
-  if (!userId) redirect("/login");
+  if (!userId) redirect("/clear-session");
 
   const user = session.user;
 
@@ -47,7 +49,6 @@ export default async function DashboardLayout({
           </div>
         </div>
       </header>
-      <DashboardTabs />
       <main className="mx-auto w-full max-w-5xl flex-1 px-4 py-6 sm:py-8">
         {children}
       </main>
