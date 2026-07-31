@@ -49,24 +49,13 @@ function comboKey(leagueIds: string[]): string {
 function PlayerPanel({
   title,
   players,
-  onClose,
 }: {
   title: string;
   players: { id: string; name: string; position: string | null }[];
-  onClose: () => void;
 }) {
   return (
     <div className="rounded-xl border border-border bg-card p-4">
-      <div className="mb-3 flex items-center justify-between gap-2">
-        <p className="text-sm font-semibold">{title}</p>
-        <button
-          type="button"
-          onClick={onClose}
-          className="shrink-0 text-xs text-muted-foreground hover:text-foreground"
-        >
-          Close
-        </button>
-      </div>
+      <p className="mb-3 text-sm font-semibold">{title}</p>
       {players.length === 0 ? (
         <p className="text-xs text-muted-foreground">No players in this group.</p>
       ) : (
@@ -99,10 +88,16 @@ function OverlapMatrix({
   combos: VennComboInfo[];
   colors: string[];
 }) {
-  const [selected, setSelected] = useState<VennComboInfo | null>(null);
+  const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const TOP_N = 15;
   const shown = combos.slice(0, TOP_N);
   const maxCount = Math.max(1, ...shown.map((c) => c.players.length));
+  // Derived fresh from the current `combos` prop (rather than stored as
+  // state) so switching perspective updates the shown players immediately,
+  // instead of freezing on whatever was selected before the switch.
+  const selectedCombo = selectedKey
+    ? (combos.find((c) => comboKey(c.leagueIds) === selectedKey) ?? null)
+    : null;
 
   return (
     <div className="flex flex-col gap-4">
@@ -119,44 +114,50 @@ function OverlapMatrix({
       </div>
 
       <div className="flex flex-col gap-1.5">
-        {shown.map((combo) => (
-          <button
-            key={comboKey(combo.leagueIds)}
-            type="button"
-            onClick={() => setSelected(combo)}
-            className="flex items-center gap-3 rounded-lg border border-border bg-card px-3 py-2 text-left hover:bg-muted"
-          >
-            <div className="flex shrink-0 gap-1">
-              {sets.map((s, i) => (
-                <span
-                  key={s.leagueId}
-                  className={
-                    combo.leagueIds.includes(s.leagueId)
-                      ? "size-2.5 rounded-full"
-                      : "size-2.5 rounded-full border border-border bg-transparent"
-                  }
-                  style={
-                    combo.leagueIds.includes(s.leagueId)
-                      ? { backgroundColor: colors[i % colors.length] }
-                      : undefined
-                  }
+        {shown.map((combo) => {
+          const key = comboKey(combo.leagueIds);
+          const isOpen = key === selectedKey;
+          return (
+            <button
+              key={key}
+              type="button"
+              onClick={() => setSelectedKey(isOpen ? null : key)}
+              className={`flex items-center gap-3 rounded-lg border px-3 py-2 text-left transition-colors ${
+                isOpen ? "border-primary bg-muted" : "border-border bg-card hover:bg-muted"
+              }`}
+            >
+              <div className="flex shrink-0 gap-1">
+                {sets.map((s, i) => (
+                  <span
+                    key={s.leagueId}
+                    className={
+                      combo.leagueIds.includes(s.leagueId)
+                        ? "size-2.5 rounded-full"
+                        : "size-2.5 rounded-full border border-border bg-transparent"
+                    }
+                    style={
+                      combo.leagueIds.includes(s.leagueId)
+                        ? { backgroundColor: colors[i % colors.length] }
+                        : undefined
+                    }
+                  />
+                ))}
+              </div>
+              <div className="relative h-2 flex-1 overflow-hidden rounded-full bg-muted">
+                <div
+                  className="absolute inset-y-0 left-0 rounded-full"
+                  style={{
+                    width: `${(combo.players.length / maxCount) * 100}%`,
+                    backgroundColor: colors[0],
+                  }}
                 />
-              ))}
-            </div>
-            <div className="relative h-2 flex-1 overflow-hidden rounded-full bg-muted">
-              <div
-                className="absolute inset-y-0 left-0 rounded-full"
-                style={{
-                  width: `${(combo.players.length / maxCount) * 100}%`,
-                  backgroundColor: colors[0],
-                }}
-              />
-            </div>
-            <span className="w-8 shrink-0 text-right text-xs font-bold tabular-nums">
-              {combo.players.length}
-            </span>
-          </button>
-        ))}
+              </div>
+              <span className="w-8 shrink-0 text-right text-xs font-bold tabular-nums">
+                {combo.players.length}
+              </span>
+            </button>
+          );
+        })}
       </div>
       {combos.length > TOP_N && (
         <p className="text-center text-xs text-muted-foreground">
@@ -164,13 +165,12 @@ function OverlapMatrix({
         </p>
       )}
 
-      {selected && (
+      {selectedCombo && (
         <PlayerPanel
-          title={`${selected.leagueIds
+          title={selectedCombo.leagueIds
             .map((id) => sets.find((s) => s.leagueId === id)?.leagueName)
-            .join(" ∩ ")} (${selected.players.length})`}
-          players={selected.players}
-          onClose={() => setSelected(null)}
+            .join(" & ")}
+          players={selectedCombo.players}
         />
       )}
     </div>

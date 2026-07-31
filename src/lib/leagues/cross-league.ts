@@ -110,16 +110,48 @@ export interface CrossLeagueAnalysis {
 // ---------------------------------------------------------------------------
 
 /**
- * Logistic win probability from projected (or current) score margin.
+ * Logistic win probability from current score margin, used only when no
+ * projections are available at all (rare — see computeMatchupWinProb).
  * Scale = 15 pts → ~73% at +15, ~50% at 0, ~27% at -15.
  */
 function logisticProb(margin: number, scale = 15): number {
   return 1 / (1 + Math.exp(-margin / scale));
 }
 
+/** Standard normal CDF (Abramowitz & Stegun 26.2.17 approximation, |error| < 7.5e-8). */
+function normalCdf(z: number): number {
+  const t = 1 / (1 + 0.2316419 * Math.abs(z));
+  const d = 0.3989423 * Math.exp((-z * z) / 2);
+  let prob =
+    d * t * (0.3193815 + t * (-0.3565638 + t * (1.781478 + t * (-1.821256 + t * 1.330274))));
+  if (z > 0) prob = 1 - prob;
+  return prob;
+}
+
 /**
- * Win probability for a single matchup, based on projected final margin
- * when available, current score margin otherwise.
+ * Approximate variance of a team's remaining (not-yet-played) production,
+ * modeling each remaining starter's final score as normally distributed
+ * around their projection with a standard deviation ~45% of that
+ * projection — a rough but commonly-cited figure for single-player weekly
+ * fantasy scoring variance. Players who've already played (or have no
+ * projection) contribute no variance — their score is locked in.
+ */
+function remainingVariance(players: LeagueTeamPlayer[]): number {
+  const VARIANCE_COEFF = 0.45;
+  return players.filter(isRemaining).reduce((sum, p) => {
+    const sd = (p.projectedPoints ?? 0) * VARIANCE_COEFF;
+    return sum + sd * sd;
+  }, 0);
+}
+
+/**
+ * Win probability for a single matchup. When projections are available,
+ * models the final margin as normally distributed — mean = projected
+ * margin, variance = combined remaining-player variance on both sides —
+ * so confidence correctly scales with how much of the week is left to
+ * play (near 50/50 early when most rosters haven't played, sharpening
+ * toward 0/100% as players finish). Falls back to a live-score-only
+ * logistic when no projections exist at all.
  */
 export function computeMatchupWinProb(matchup: LeagueMatchup): {
   currentMargin: number | null;
@@ -143,8 +175,14 @@ export function computeMatchupWinProb(matchup: LeagueMatchup): {
   if (isBye) {
     winProbability = 1;
   } else if (projectedMargin != null) {
-    // Tighter scale (10) since projections are more confident than live scores alone
-    winProbability = logisticProb(projectedMargin, 10);
+    const varMe = remainingVariance(matchup.team.players);
+    const varOpp = matchup.opponent ? remainingVariance(matchup.opponent.players) : 0;
+    // Floor so a matchup with nothing left to play doesn't collapse to a
+    // hard 0%/100% — there's always a little residual uncertainty (stat
+    // corrections, DST/K scoring the proxy above doesn't model well, etc).
+    const FLOOR_SD = 3;
+    const sd = Math.sqrt(varMe + varOpp + FLOOR_SD * FLOOR_SD);
+    winProbability = normalCdf(projectedMargin / sd);
   } else if (currentMargin != null) {
     winProbability = logisticProb(currentMargin, 15);
   } else {

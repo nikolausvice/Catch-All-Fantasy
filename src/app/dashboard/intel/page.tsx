@@ -282,17 +282,9 @@ export default async function IntelPage() {
   return (
     <div className="flex flex-col gap-8">
       {/* Header */}
-      <div>
-        <Link
-          href="/dashboard"
-          className="text-sm text-muted-foreground hover:text-foreground"
-        >
-          ← Back
-        </Link>
-        <div className="mt-2 flex items-center justify-between gap-3">
-          <h1 className="text-2xl font-semibold tracking-tight">Intel</h1>
-          <RefreshButton />
-        </div>
+      <div className="flex items-center justify-between gap-3">
+        <h1 className="text-2xl font-semibold tracking-tight">Intel</h1>
+        <RefreshButton />
       </div>
 
       {failedLeagues.length > 0 && (

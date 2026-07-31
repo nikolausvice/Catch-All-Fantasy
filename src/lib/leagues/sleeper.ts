@@ -118,19 +118,22 @@ function buildSleeperTeam({
 
   const allPlayers = [...starterPlayers, ...benchPlayers];
 
-  // Compute projected final score: actual points already scored +
-  // projected points for starters who haven't yet played (points === 0
-  // and projection > 0 is our proxy for "game hasn't started").
+  // Compute projected final score per starter as max(pointsSoFar, projection):
+  // once a player's actual output passes their pre-game projection, use the
+  // actual; otherwise assume they still close the gap to their projection by
+  // game end. This handles partial-game scoring correctly — a player at 8
+  // actual points with a 14-point projection contributes 14, not 8 (the old
+  // "only use the projection if they haven't scored at all" logic dropped
+  // their remaining upside the moment they got on the board, which is why
+  // projected totals ran a few points low for anyone mid-game).
   let teamProjectedScore: number | undefined;
   const starters = allPlayers.filter((p) => p.isStarter);
   const hasAnyProjection = starters.some((p) => p.projectedPoints !== undefined);
   if (hasAnyProjection) {
     teamProjectedScore = starters.reduce((sum, p) => {
       const scored = p.points ?? 0;
-      const remaining = (scored === 0 && (p.projectedPoints ?? 0) > 0)
-        ? (p.projectedPoints ?? 0)
-        : scored;
-      return sum + remaining;
+      const projected = p.projectedPoints ?? 0;
+      return sum + Math.max(scored, projected);
     }, 0);
   }
 
