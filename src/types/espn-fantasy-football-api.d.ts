@@ -34,6 +34,13 @@ declare module "espn-fantasy-football-api/node" {
     ties: number;
   }
 
+  interface EspnBoxscore {
+    homeTeamId: number;
+    awayTeamId: number | null;
+    homeScore: number;
+    awayScore: number;
+  }
+
   export class Client {
     constructor(options: ClientOptions);
     setCookies(cookies: { espnS2: string; SWID: string }): void;
@@ -42,5 +49,10 @@ declare module "espn-fantasy-football-api/node" {
       seasonId: number;
       scoringPeriodId: number;
     }): Promise<EspnTeam[]>;
+    getBoxscoreForWeek(options: {
+      seasonId: number;
+      matchupPeriodId: number;
+      scoringPeriodId: number;
+    }): Promise<EspnBoxscore[]>;
   }
 }
