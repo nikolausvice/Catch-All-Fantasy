@@ -5,7 +5,6 @@ import { auth } from "@/auth";
 import { db } from "@/db/client";
 import { connectedLeagues } from "@/db/schema";
 import { IntelTabs } from "@/components/intel-tabs";
-import { RefreshButton } from "@/components/refresh-button";
 import { StillPlayingSection } from "@/components/still-playing-section";
 import { VennExplorer } from "@/components/venn-diagram";
 import type { VennComboInfo, VennSetInfo } from "@/components/venn-diagram";
@@ -282,10 +281,7 @@ export default async function IntelPage() {
   return (
     <div className="flex flex-col gap-8">
       {/* Header */}
-      <div className="flex items-center justify-between gap-3">
-        <h1 className="text-2xl font-semibold tracking-tight">Intel</h1>
-        <RefreshButton />
-      </div>
+      <h1 className="text-2xl font-semibold tracking-tight">Intel</h1>
 
       {failedLeagues.length > 0 && (
         <div className="rounded-xl border border-destructive/30 bg-destructive/10 p-4 text-sm text-destructive">

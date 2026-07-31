@@ -53,16 +53,28 @@ export async function getSleeperTeamSummaries(
 }
 
 /**
- * Determines which points key to use from the league's scoring_settings.
- * Sleeper projections export `pts_ppr`, `pts_half_ppr`, and `pts_std`.
+ * Sleeper's projections endpoint only exposes canned `pts_ppr`/`pts_half_ppr`/
+ * `pts_std` rollups, which don't reflect a league's actual custom scoring
+ * settings (bonus thresholds, non-standard TD values, IDP categories, etc.) —
+ * using them produced projected totals that were consistently a couple
+ * points off from what the league would really award. Instead, compute the
+ * projection from the same raw per-stat-category figures Sleeper uses to
+ * compute actual scores, weighted by the league's own `scoring_settings` —
+ * the same math Sleeper's own scoring engine applies.
  */
-function detectProjectionKey(
+function computeProjectedPoints(
+  stats: Record<string, number | undefined>,
   scoringSettings: Record<string, number>,
-): "pts_ppr" | "pts_half_ppr" | "pts_std" {
-  const rec = scoringSettings["rec"] ?? 0;
-  if (rec >= 1) return "pts_ppr";
-  if (rec >= 0.5) return "pts_half_ppr";
-  return "pts_std";
+): number | undefined {
+  let total = 0;
+  let hasAny = false;
+  for (const [statKey, weight] of Object.entries(scoringSettings)) {
+    const value = stats[statKey];
+    if (value === undefined) continue;
+    total += value * weight;
+    hasAny = true;
+  }
+  return hasAny ? total : undefined;
 }
 
 /**
@@ -77,7 +89,7 @@ function buildSleeperTeam({
   slotPositions,
   playersMap,
   matchup,
-  projectionKey,
+  scoringSettings,
   projectionsMap,
 }: {
   roster: SleeperRoster;
@@ -85,7 +97,7 @@ function buildSleeperTeam({
   slotPositions: string[];
   playersMap: Awaited<ReturnType<typeof getSleeperPlayers>>;
   matchup: SleeperMatchup | undefined;
-  projectionKey: "pts_ppr" | "pts_half_ppr" | "pts_std";
+  scoringSettings: Record<string, number>;
   projectionsMap: Awaited<ReturnType<typeof getSleeperProjections>>;
 }): LeagueTeam {
   const playerPoints = matchup?.players_points ?? {};
@@ -95,7 +107,10 @@ function buildSleeperTeam({
   function makePlayer(playerId: string, isStarter: boolean, slotIndex?: number): LeagueTeamPlayer {
     const player = playersMap[playerId];
     const pts = playerPoints[playerId];
-    const proj = projectionsMap[playerId]?.stats?.[projectionKey];
+    const proj = computeProjectedPoints(
+      projectionsMap[playerId]?.stats ?? {},
+      scoringSettings,
+    );
     return {
       id: playerId,
       name:
@@ -171,7 +186,6 @@ export async function getSleeperTeamMatchup({
   const projectionsMap = await getSleeperProjections(league.season, week);
 
   const slotPositions = league.roster_positions;
-  const projectionKey = detectProjectionKey(league.scoring_settings);
   const summariesById = new Map(summaries.map((s) => [s.id, s]));
   const rostersById = new Map(rosters.map((r) => [String(r.roster_id), r]));
   const matchupsByRosterId = new Map(
@@ -193,7 +207,12 @@ export async function getSleeperTeamMatchup({
         )
       : undefined;
 
-  const buildArgs = { slotPositions, playersMap, projectionKey, projectionsMap };
+  const buildArgs = {
+    slotPositions,
+    playersMap,
+    scoringSettings: league.scoring_settings,
+    projectionsMap,
+  };
 
   const teamBuilt = buildSleeperTeam({
     roster: myRoster,

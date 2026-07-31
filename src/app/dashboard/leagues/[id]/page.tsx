@@ -10,7 +10,6 @@ import { getCachedEspnTeamMatchup, getCachedSleeperTeamMatchup } from "@/lib/lea
 import { computeMatchupWinProb } from "@/lib/leagues/cross-league";
 import { getCurrentNflWeek } from "@/lib/leagues/week";
 import { SleeperApiError } from "@/lib/sleeper/client";
-import { RefreshButton } from "@/components/refresh-button";
 import { AvatarImage } from "@/components/avatar-image";
 import type { LeagueMatchup, LeagueTeam, LeagueTeamPlayer } from "@/lib/leagues/types";
 
@@ -169,6 +168,118 @@ function RosterPanel({ team }: { team: LeagueTeam }) {
   );
 }
 
+interface RosterRow {
+  slot: string | null;
+  mine: LeagueTeamPlayer | undefined;
+  theirs: LeagueTeamPlayer | undefined;
+}
+
+/**
+ * Pairs both rosters slot-for-slot (starters by lineup order, bench by
+ * index) so they can render as one mirrored list instead of two side-by-side
+ * panels — the side-by-side layout squeezed unreadably on mobile.
+ */
+function pairRosters(mine: LeagueTeamPlayer[], theirs: LeagueTeamPlayer[]): RosterRow[] {
+  const myStarters = mine.filter((p) => p.isStarter);
+  const theirStarters = theirs.filter((p) => p.isStarter);
+  const myBench = mine.filter((p) => !p.isStarter);
+  const theirBench = theirs.filter((p) => !p.isStarter);
+
+  const rows: RosterRow[] = [];
+  const starterCount = Math.max(myStarters.length, theirStarters.length);
+  for (let i = 0; i < starterCount; i++) {
+    const m = myStarters[i];
+    const t = theirStarters[i];
+    rows.push({ slot: (m ?? t)?.slot ?? null, mine: m, theirs: t });
+  }
+
+  const benchCount = Math.max(myBench.length, theirBench.length);
+  for (let i = 0; i < benchCount; i++) {
+    rows.push({ slot: "BN", mine: myBench[i], theirs: theirBench[i] });
+  }
+
+  return rows;
+}
+
+function PlayerSide({
+  player,
+  align,
+}: {
+  player: LeagueTeamPlayer | undefined;
+  align: "left" | "right";
+}) {
+  const isRight = align === "right";
+
+  if (!player) {
+    return (
+      <div className={`flex min-w-0 ${isRight ? "justify-end" : ""}`}>
+        <span className="text-sm text-muted-foreground/40">—</span>
+      </div>
+    );
+  }
+
+  const nameBlock = (
+    <div className={`min-w-0 ${isRight ? "text-right" : ""}`}>
+      <p className="truncate text-sm font-medium">{player.name}</p>
+      <p className="truncate text-[11px] text-muted-foreground">
+        {[player.position, player.proTeam].filter(Boolean).join(" · ")}
+      </p>
+    </div>
+  );
+  const pointsBadge =
+    player.points !== undefined ? (
+      <span className="w-9 shrink-0 text-center text-xs font-semibold tabular-nums">
+        {player.points.toFixed(1)}
+      </span>
+    ) : (
+      <span className="w-9 shrink-0" />
+    );
+
+  return (
+    <div className={`flex min-w-0 items-center gap-2 ${isRight ? "justify-end" : ""}`}>
+      {isRight ? (
+        <>
+          {pointsBadge}
+          {nameBlock}
+        </>
+      ) : (
+        <>
+          {nameBlock}
+          {pointsBadge}
+        </>
+      )}
+    </div>
+  );
+}
+
+function MirroredRoster({ team, opponent }: { team: LeagueTeam; opponent: LeagueTeam }) {
+  const rows = pairRosters(team.players, opponent.players);
+
+  return (
+    <div className="rounded-xl border border-border bg-card p-4">
+      <div className="mb-3 grid grid-cols-[1fr_2.75rem_1fr] items-center gap-2">
+        <p className="truncate text-right text-sm font-semibold">{team.name}</p>
+        <span />
+        <p className="truncate text-sm font-semibold">{opponent.name}</p>
+      </div>
+      <div className="flex flex-col">
+        {rows.map((row, i) => (
+          <div
+            key={i}
+            className="grid grid-cols-[1fr_2.75rem_1fr] items-center gap-2 border-b border-border/50 py-2 last:border-0"
+          >
+            <PlayerSide player={row.mine} align="right" />
+            <span className="shrink-0 text-center text-[10px] font-semibold uppercase text-muted-foreground">
+              {row.slot ? slotLabel(row.slot) : ""}
+            </span>
+            <PlayerSide player={row.theirs} align="left" />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export default async function LeagueDetailPage({
   params,
 }: {
@@ -223,7 +334,6 @@ export default async function LeagueDetailPage({
             </p>
           </div>
           <div className="flex shrink-0 items-center gap-2">
-            <RefreshButton />
             <Link
               href={`/dashboard/leagues/${id}/select-team`}
               className="rounded-md border border-border px-3 py-1.5 text-xs font-medium hover:bg-muted"
@@ -342,21 +452,15 @@ export default async function LeagueDetailPage({
             </div>
           )}
 
-          {/* Roster panels */}
-          <div className="grid gap-4 md:grid-cols-2">
+          {/* Roster */}
+          {matchup.opponent ? (
+            <MirroredRoster team={matchup.team} opponent={matchup.opponent} />
+          ) : (
             <div className="rounded-xl border border-border bg-card p-4">
               <h2 className="mb-4 text-sm font-semibold">Your lineup</h2>
               <RosterPanel team={matchup.team} />
             </div>
-            {matchup.opponent && (
-              <div className="rounded-xl border border-border bg-card p-4">
-                <h2 className="mb-4 text-sm font-semibold">
-                  {matchup.opponent.name}
-                </h2>
-                <RosterPanel team={matchup.opponent} />
-              </div>
-            )}
-          </div>
+          )}
         </>
       )}
     </div>

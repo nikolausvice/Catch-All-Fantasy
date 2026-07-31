@@ -487,8 +487,10 @@ export function analyzeCrossLeague(
 
   // ── 4. Aggregates ───────────────────────────────────────────────────────
 
+  // Bye leagues have no matchup to win — excluded here (and from probAllWins/
+  // totalMatchups below) so they don't get counted as a free guaranteed win.
   const activeMatchups = winProbabilities.filter((w) => !w.isBye);
-  const expectedWins = winProbabilities.reduce(
+  const expectedWins = activeMatchups.reduce(
     (sum, w) => sum + w.winProbability,
     0,
   );

@@ -2,6 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { auth } from "@/auth";
 import { DashboardTabs } from "@/components/dashboard-tabs";
+import { RefreshButton } from "@/components/refresh-button";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { requireSessionUserId } from "@/lib/auth/require-user";
 import { signOut } from "../(auth)/actions";
@@ -33,6 +34,7 @@ export default async function DashboardLayout({
             <span className="hidden text-sm text-muted-foreground sm:inline">
               {user.email}
             </span>
+            <RefreshButton />
             <ThemeToggle />
             <form action={signOut}>
               <button
