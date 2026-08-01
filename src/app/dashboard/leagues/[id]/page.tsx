@@ -152,7 +152,8 @@ function pairRosters(mine: LeagueTeamPlayer[], theirs: LeagueTeamPlayer[]): Rost
 // Fixed 5-column template shared by the header and every row, so the two
 // point columns and the slot spine land in exactly the same place on every
 // line regardless of name length — that's what makes it read as "aligned."
-const ROSTER_GRID_COLS = "grid-cols-[2.5rem_1fr_2.75rem_1fr_2.5rem]";
+const ROSTER_GRID_COLS =
+  "grid-cols-[2rem_1fr_2.25rem_1fr_2rem] sm:grid-cols-[2.5rem_1fr_2.75rem_1fr_2.5rem]";
 
 // Subtle per-position tint so the eye can group QB/RB/WR/etc. rows at a
 // glance. Keyed by the post-slotLabel display name (FLEX/DST already
@@ -215,16 +216,16 @@ function MirroredRoster({ team, opponent }: { team: LeagueTeam; opponent: League
 
   return (
     <div className="overflow-hidden rounded-xl border border-border bg-card">
-      <div className={`grid ${ROSTER_GRID_COLS} items-center gap-2 border-b border-border px-3 py-2.5`}>
-        <p className="col-span-2 truncate text-right text-sm font-semibold">{team.name}</p>
+      <div className={`grid ${ROSTER_GRID_COLS} items-center gap-1.5 border-b border-border px-2 py-2.5 sm:gap-2 sm:px-3`}>
+        <p className="col-span-2 min-w-0 truncate text-right text-sm font-semibold">{team.name}</p>
         <span />
-        <p className="col-span-2 truncate text-sm font-semibold">{opponent.name}</p>
+        <p className="col-span-2 min-w-0 truncate text-sm font-semibold">{opponent.name}</p>
       </div>
       <div className="flex flex-col">
         {rows.map((row, i) => (
           <div
             key={i}
-            className={`grid ${ROSTER_GRID_COLS} items-center gap-2 border-b border-border/40 px-3 py-2 last:border-0 ${slotShade(row.slot)}`}
+            className={`grid ${ROSTER_GRID_COLS} items-center gap-1.5 border-b border-border/40 px-2 py-2 last:border-0 sm:gap-2 sm:px-3 ${slotShade(row.slot)}`}
           >
             <PointsCell player={row.mine} align="right" />
             <PlayerName player={row.mine} align="right" />
@@ -282,7 +283,7 @@ export default async function LeagueDetailPage({
         >
           ← Back to dashboard
         </Link>
-        <div className="mt-2 flex items-start justify-between gap-3">
+        <div className="mt-2 flex flex-wrap items-start justify-between gap-3">
           <div className="min-w-0">
             <h1 className="truncate text-2xl font-semibold tracking-tight">
               {league.leagueName}
@@ -314,21 +315,21 @@ export default async function LeagueDetailPage({
       {matchup && (
         <>
           {/* Score panel — left/right split */}
-          <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-3 rounded-xl border border-border bg-card p-4">
+          <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2 rounded-xl border border-border bg-card p-3 sm:gap-3 sm:p-4">
             {/* User team */}
-            <div className="flex flex-col gap-1">
+            <div className="flex min-w-0 flex-col gap-1">
               <p className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
                 Your team
               </p>
-              <div className="flex items-center gap-2">
+              <div className="flex w-full items-center gap-2">
                 <TeamAvatar
                   name={matchup.team.name}
                   avatarUrl={matchup.team.avatarUrl}
                 />
-                <p className="truncate font-semibold">{matchup.team.name}</p>
+                <p className="min-w-0 flex-1 truncate font-semibold">{matchup.team.name}</p>
               </div>
               {matchup.teamScore != null && (
-                <p className="text-3xl font-bold tabular-nums">
+                <p className="text-2xl font-bold tabular-nums sm:text-3xl">
                   {matchup.teamScore.toFixed(1)}
                   {matchup.teamProjectedScore != null && (
                     <span className="ml-1 text-xs font-normal text-muted-foreground">
@@ -348,12 +349,12 @@ export default async function LeagueDetailPage({
 
             {/* Opponent */}
             {matchup.opponent ? (
-              <div className="flex flex-col items-end gap-1 text-right">
+              <div className="flex min-w-0 flex-col items-end gap-1 text-right">
                 <p className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
                   Opponent
                 </p>
-                <div className="flex items-center gap-2">
-                  <p className="truncate font-semibold">
+                <div className="flex w-full items-center gap-2">
+                  <p className="min-w-0 flex-1 truncate font-semibold">
                     {matchup.opponent.name}
                   </p>
                   <TeamAvatar
@@ -362,7 +363,7 @@ export default async function LeagueDetailPage({
                   />
                 </div>
                 {matchup.opponentScore != null && (
-                  <p className="text-3xl font-bold tabular-nums">
+                  <p className="text-2xl font-bold tabular-nums sm:text-3xl">
                     {matchup.opponentScore.toFixed(1)}
                     {matchup.opponentProjectedScore != null && (
                       <span className="ml-1 text-xs font-normal text-muted-foreground">
@@ -376,19 +377,19 @@ export default async function LeagueDetailPage({
                 </p>
               </div>
             ) : (
-              <div className="flex flex-col items-end gap-1 text-right">
+              <div className="flex min-w-0 flex-col items-end gap-1 text-right">
                 <p className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
                   Opponent
                 </p>
-                <div className="flex items-center gap-2">
-                  <p className="truncate font-semibold text-muted-foreground">
+                <div className="flex w-full items-center gap-2">
+                  <p className="min-w-0 flex-1 truncate font-semibold text-muted-foreground">
                     Bye week
                   </p>
                   <div className="flex size-9 shrink-0 items-center justify-center rounded-md bg-muted text-xs font-medium text-muted-foreground">
                     –
                   </div>
                 </div>
-                <p className="text-3xl font-bold tabular-nums text-muted-foreground/40">
+                <p className="text-2xl font-bold tabular-nums text-muted-foreground/40 sm:text-3xl">
                   –
                 </p>
                 <p className="text-xs text-muted-foreground">&nbsp;</p>
