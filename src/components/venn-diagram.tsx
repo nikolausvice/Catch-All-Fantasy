@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { Check } from "lucide-react";
 
 export interface VennSetInfo {
   leagueId: string;
@@ -124,16 +125,33 @@ export function VennExplorer({ sets, combos }: { sets: VennSetInfo[]; combos: Ve
               disabled={!hasOverlap}
               onClick={() => toggle(s.leagueId)}
               title={!hasOverlap ? `${s.label} — no overlap with any other team` : s.label}
-              className={`flex min-h-11 items-center justify-center rounded-lg border-2 px-2 py-1.5 text-center text-xs font-semibold leading-tight transition-all ${
-                !hasOverlap ? "cursor-not-allowed opacity-40" : viable ? "" : "opacity-30"
+              className={`relative flex min-h-11 items-center justify-center rounded-lg border-2 px-2 py-1.5 text-center text-xs font-semibold leading-tight transition-all ${
+                !hasOverlap
+                  ? "cursor-not-allowed opacity-40"
+                  : isSelected
+                    ? "scale-[1.04] shadow-md"
+                    : viable
+                      ? ""
+                      : "opacity-30"
               }`}
               style={{
                 borderColor: color,
-                backgroundColor: isSelected ? `${color}26` : "transparent",
-                color,
+                backgroundColor: isSelected ? color : "transparent",
+                color: isSelected ? "#fff" : color,
+                boxShadow: isSelected
+                  ? `0 0 0 3px var(--background), 0 0 0 5px ${color}80`
+                  : undefined,
               }}
             >
               {s.label}
+              {isSelected && (
+                <span
+                  className="absolute -right-1.5 -top-1.5 flex size-4 items-center justify-center rounded-full border-2 border-background"
+                  style={{ backgroundColor: color }}
+                >
+                  <Check className="size-2.5 text-white" strokeWidth={3} />
+                </span>
+              )}
             </button>
           );
         })}

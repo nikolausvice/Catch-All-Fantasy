@@ -4,11 +4,17 @@ import { useState } from "react";
 
 const TABS = [
   { key: "overview", label: "Overview" },
+  { key: "live", label: "Live & Rooting" },
+] as const;
+
+type TabKey = (typeof TABS)[number]["key"];
+
+const LIVE_SUB_TABS = [
   { key: "playing", label: "Still Playing" },
   { key: "rooting", label: "Rooting & Overlap" },
 ] as const;
 
-type TabKey = (typeof TABS)[number]["key"];
+type LiveSubTabKey = (typeof LIVE_SUB_TABS)[number]["key"];
 
 export function IntelTabs({
   overview,
@@ -22,6 +28,12 @@ export function IntelTabs({
   stillPlayingCount: number;
 }) {
   const [active, setActive] = useState<TabKey>("overview");
+  // Nothing chosen yet → lead with whichever half of "Live & Rooting" is
+  // actually actionable right now: live conflicts if any exist, otherwise
+  // the always-available overlap explorer.
+  const [liveSubTab, setLiveSubTab] = useState<LiveSubTabKey | null>(null);
+  const resolvedSubTab: LiveSubTabKey =
+    liveSubTab ?? (stillPlayingCount > 0 ? "playing" : "rooting");
 
   return (
     <div className="flex flex-col gap-5">
@@ -38,7 +50,7 @@ export function IntelTabs({
             }`}
           >
             {tab.label}
-            {tab.key === "playing" && stillPlayingCount > 0 && (
+            {tab.key === "live" && stillPlayingCount > 0 && (
               <span className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-bold">
                 {stillPlayingCount}
               </span>
@@ -48,8 +60,41 @@ export function IntelTabs({
       </div>
 
       {active === "overview" && <div className="flex flex-col gap-8">{overview}</div>}
-      {active === "playing" && stillPlaying}
-      {active === "rooting" && <div className="flex flex-col gap-8">{rootingAndOverlap}</div>}
+
+      {active === "live" && (
+        <div className="flex flex-col gap-4">
+          <div className="flex w-full gap-1 overflow-x-auto rounded-lg bg-muted/60 p-1 text-sm">
+            {LIVE_SUB_TABS.map((tab) => (
+              <button
+                key={tab.key}
+                type="button"
+                onClick={() => setLiveSubTab(tab.key)}
+                className={`flex shrink-0 items-center gap-1.5 rounded-md px-3 py-1.5 font-medium transition-colors ${
+                  resolvedSubTab === tab.key
+                    ? "bg-card text-foreground shadow-sm"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                {tab.label}
+                {tab.key === "playing" && stillPlayingCount > 0 && (
+                  <span className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-bold">
+                    {stillPlayingCount}
+                  </span>
+                )}
+              </button>
+            ))}
+          </div>
+
+          {/* Both stay mounted (toggled via CSS) so switching back and
+              forth doesn't reset each panel's own filters/selection. */}
+          <div className={resolvedSubTab === "playing" ? "flex flex-col gap-8" : "hidden"}>
+            {stillPlaying}
+          </div>
+          <div className={resolvedSubTab === "rooting" ? "flex flex-col gap-8" : "hidden"}>
+            {rootingAndOverlap}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
