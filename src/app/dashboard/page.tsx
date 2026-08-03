@@ -7,10 +7,12 @@ import { connectedLeagues } from "@/db/schema";
 import { AnalysisSection } from "@/components/analysis-section";
 import { AvatarImage } from "@/components/avatar-image";
 import { IntelTabs } from "@/components/intel-tabs";
+import { OutcomeLandscapeSection } from "@/components/outcome-landscape-section";
 import { VennExplorer } from "@/components/venn-diagram";
 import type { VennComboInfo, VennSetInfo } from "@/components/venn-diagram";
 import { analyzeCrossLeague } from "@/lib/leagues/cross-league";
 import { getNflGameStatuses, type GameStatus } from "@/lib/leagues/nfl-schedule";
+import { computeOutcomeLandscape } from "@/lib/leagues/outcome-landscape";
 import {
   buildRosterSets,
   computeOverlapCombos,
@@ -339,6 +341,16 @@ export default async function DashboardPage() {
   const opponentRosterSets = buildRosterSets(matchups, "opponent");
   const overlap = toOverlapViewData(ownRosterSets, opponentRosterSets);
 
+  const outcomeLandscape = computeOutcomeLandscape(
+    matchups.map(({ leagueId, leagueName, platform, matchup }) => ({
+      leagueId,
+      leagueName,
+      platform,
+      matchup,
+    })),
+    statusByTeam,
+  );
+
   const failedLeagues = matchups.filter((m) => m.error);
 
   return (
@@ -375,6 +387,7 @@ export default async function DashboardPage() {
             <VennExplorer sets={overlap.sets} combos={overlap.combos} />
           }
           analysis={<AnalysisSection analysis={analysis} />}
+          outcomeLandscape={<OutcomeLandscapeSection landscape={outcomeLandscape} />}
         />
       )}
     </div>
