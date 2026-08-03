@@ -1,4 +1,14 @@
+import { normalizeTeamAbbrev, type GameStatus } from "./nfl-schedule";
 import type { LeagueMatchup } from "./types";
+
+interface RosterPlayerInfo {
+  name: string;
+  position: string | null;
+  proTeam: string | null;
+  projectedPoints?: number;
+  isStarter: boolean;
+  isRookie?: boolean;
+}
 
 export interface LeagueRosterSet {
   leagueId: string;
@@ -7,10 +17,7 @@ export interface LeagueRosterSet {
   teamName: string;
   platform: string;
   playerIds: Set<string>;
-  players: Map<
-    string,
-    { name: string; position: string | null; proTeam: string | null; projectedPoints?: number }
-  >;
+  players: Map<string, RosterPlayerInfo>;
 }
 
 /**
@@ -49,7 +56,7 @@ function normalizePosition(position: string | null): string {
  * producing a nonsense number. Position is cheap insurance against that: a
  * same-name collision within the same position is vanishingly rare.
  */
-function normalizePlayerKey(name: string, position: string | null): string {
+export function normalizePlayerKey(name: string, position: string | null): string {
   return `${normalizeName(name)}|${normalizePosition(position)}`;
 }
 
@@ -74,10 +81,7 @@ export function buildRosterSets(
     if (!team) continue;
 
     const playerIds = new Set<string>();
-    const players = new Map<
-      string,
-      { name: string; position: string | null; proTeam: string | null; projectedPoints?: number }
-    >();
+    const players = new Map<string, RosterPlayerInfo>();
     for (const p of team.players) {
       const key = normalizePlayerKey(p.name, p.position);
       playerIds.add(key);
@@ -86,11 +90,83 @@ export function buildRosterSets(
         position: p.position,
         proTeam: p.proTeam,
         projectedPoints: p.projectedPoints,
+        isStarter: p.isStarter,
+        isRookie: p.isRookie,
       });
     }
     sets.push({ leagueId, leagueName, teamName: team.name, platform, playerIds, players });
   }
   return sets;
+}
+
+export interface LeagueFingerprint {
+  qb: number;
+  wr: number;
+  rb: number;
+  bench: number;
+  rookie: number;
+  bye: number;
+}
+
+export const FINGERPRINT_AXES: { key: keyof LeagueFingerprint; label: string }[] = [
+  { key: "qb", label: "QB" },
+  { key: "wr", label: "WR" },
+  { key: "rb", label: "RB" },
+  { key: "bench", label: "Bench" },
+  { key: "rookie", label: "Rookie" },
+  { key: "bye", label: "Bye week" },
+];
+
+function fractionShared(matching: [string, RosterPlayerInfo][], otherIds: Set<string>): number {
+  if (matching.length === 0) return 0;
+  const shared = matching.filter(([id]) => otherIds.has(id)).length;
+  return shared / matching.length;
+}
+
+function isPosition(p: RosterPlayerInfo, position: string): boolean {
+  return (p.position ?? "").toUpperCase() === position;
+}
+
+/**
+ * Each league's "fingerprint": what fraction of ITS roster in each category
+ * (QB/WR/RB/bench/rookie/players on bye this week) also appears somewhere
+ * else across your other leagues. One fingerprint per league — plot them
+ * all on the same radar, distinguished by color, to see at a glance which
+ * leagues are most entangled with the rest of your portfolio and in what way.
+ *
+ * Rookie detection currently only works for Sleeper rosters (years_exp data
+ * isn't available from the ESPN wrapper this app uses) — ESPN players will
+ * never count toward the rookie axis, so a league with only ESPN rosters
+ * will always show 0% there regardless of its actual rookie count.
+ */
+export function computeLeagueFingerprints(
+  sets: LeagueRosterSet[],
+  statusByTeam: Map<string, GameStatus>,
+): { leagueId: string; teamName: string; values: LeagueFingerprint }[] {
+  return sets.map((mine, i) => {
+    const otherIds = new Set<string>();
+    sets.forEach((s, j) => {
+      if (j === i) return;
+      for (const id of s.playerIds) otherIds.add(id);
+    });
+
+    const entries = [...mine.players.entries()];
+    const isByeThisWeek = (p: RosterPlayerInfo) =>
+      statusByTeam.size > 0 && !statusByTeam.has(normalizeTeamAbbrev(p.proTeam));
+
+    return {
+      leagueId: mine.leagueId,
+      teamName: mine.teamName,
+      values: {
+        qb: fractionShared(entries.filter(([, p]) => isPosition(p, "QB")), otherIds),
+        wr: fractionShared(entries.filter(([, p]) => isPosition(p, "WR")), otherIds),
+        rb: fractionShared(entries.filter(([, p]) => isPosition(p, "RB")), otherIds),
+        bench: fractionShared(entries.filter(([, p]) => !p.isStarter), otherIds),
+        rookie: fractionShared(entries.filter(([, p]) => p.isRookie === true), otherIds),
+        bye: fractionShared(entries.filter(([, p]) => isByeThisWeek(p)), otherIds),
+      },
+    };
+  });
 }
 
 export interface OverlapCombo {

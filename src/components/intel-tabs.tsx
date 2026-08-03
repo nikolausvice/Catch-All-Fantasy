@@ -5,20 +5,19 @@ import { useState } from "react";
 const TABS = [
   { key: "overview", label: "Overview" },
   { key: "players", label: "Players" },
+  { key: "analysis", label: "Analysis" },
 ] as const;
 
 type TabKey = (typeof TABS)[number]["key"];
 
 export function IntelTabs({
   overview,
-  stillPlaying,
   rootingAndOverlap,
-  stillPlayingCount,
+  analysis,
 }: {
   overview: React.ReactNode;
-  stillPlaying: React.ReactNode;
   rootingAndOverlap: React.ReactNode;
-  stillPlayingCount: number;
+  analysis: React.ReactNode;
 }) {
   const [active, setActive] = useState<TabKey>("overview");
 
@@ -38,23 +37,14 @@ export function IntelTabs({
               }`}
             >
               {tab.label}
-              {tab.key === "players" && stillPlayingCount > 0 && (
-                <span className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-bold">
-                  {stillPlayingCount}
-                </span>
-              )}
             </button>
           ))}
         </div>
       </div>
 
       {active === "overview" && <div className="flex flex-col gap-8">{overview}</div>}
-      {active === "players" && (
-        <div className="flex flex-col gap-8">
-          {rootingAndOverlap}
-          {stillPlaying}
-        </div>
-      )}
+      {active === "players" && <div className="flex flex-col gap-8">{rootingAndOverlap}</div>}
+      {active === "analysis" && <div className="flex flex-col gap-8">{analysis}</div>}
     </div>
   );
 }

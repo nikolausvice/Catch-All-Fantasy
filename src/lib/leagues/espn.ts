@@ -41,6 +41,21 @@ function normalizePosition(position: string | null): string {
   return p;
 }
 
+/**
+ * ESPN's `defaultPositionId` shares its id space with flex slot *categories*
+ * (id 3 = "RB/WR", id 5 = "WR/TE") rather than always being a single real
+ * position — some multi-eligible players come back with one of those
+ * compound values instead of their actual position. Collapse to the first
+ * listed position so the roster/filter UI sees one real position per player,
+ * not the flex slot they happen to be eligible for. "D/ST" is a genuine
+ * position (not a flex category) and is left untouched.
+ */
+function canonicalPlayerPosition(position: string | null): string | null {
+  if (!position || position === "D/ST") return position;
+  const [first] = position.split("/");
+  return first || position;
+}
+
 const STANDARD_LINEUP: { slot: string; positions: string[]; count: number }[] = [
   { slot: "QB", positions: ["QB"], count: 1 },
   { slot: "RB", positions: ["RB"], count: 2 },
@@ -104,7 +119,7 @@ function buildEspnTeamFromBoxscore(
     const entry: LeagueTeamPlayer = {
       id: String(p.id),
       name: p.fullName,
-      position: details?.defaultPosition ?? null,
+      position: canonicalPlayerPosition(details?.defaultPosition ?? null),
       proTeam: details?.proTeam ?? null,
       isStarter: !isBench,
       slot: slot || undefined,
@@ -218,7 +233,7 @@ export async function getEspnTeamMatchup({
       (raw?.roster ?? []).map((p) => ({
         id: String(p.id),
         name: p.fullName,
-        position: p.defaultPosition,
+        position: canonicalPlayerPosition(p.defaultPosition),
         proTeam: p.proTeamAbbreviation,
       })),
     );

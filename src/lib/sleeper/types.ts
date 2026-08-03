@@ -65,6 +65,8 @@ export interface SleeperPlayer {
   position: string | null;
   team: string | null;
   status: string | null;
+  /** Seasons of NFL experience; 0 = rookie. Absent for some inactive/practice-squad entries. */
+  years_exp?: number | null;
 }
 
 export type SleeperPlayersMap = Record<string, SleeperPlayer>;

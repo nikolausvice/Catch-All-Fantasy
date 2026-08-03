@@ -38,11 +38,11 @@ export default async function DashboardLayout({
   return (
     <div className="flex min-h-screen flex-col">
       <header className="sticky top-0 z-10 border-b border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80">
-        <div className="mx-auto flex max-w-5xl items-center justify-between px-4 py-3 sm:py-4">
+        <div className="mx-auto flex max-w-5xl flex-col gap-2 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:py-4">
           <Link href="/dashboard" className="font-semibold tracking-tight">
             Catch All Fantasy
           </Link>
-          <div className="flex items-center gap-2 sm:gap-3">
+          <div className="flex flex-wrap items-center gap-2 sm:gap-3">
             <span className="hidden text-sm text-muted-foreground sm:inline">
               {user.email}
             </span>

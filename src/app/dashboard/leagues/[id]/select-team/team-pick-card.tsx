@@ -31,7 +31,7 @@ export function TeamPickCard({
             teamId: team.id,
             teamName: team.name,
           });
-          router.push(`/dashboard/leagues/${leagueRowId}`);
+          router.push("/dashboard");
         })
       }
       className={cn(

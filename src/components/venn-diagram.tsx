@@ -45,8 +45,16 @@ function comboSide(sideById: Map<string, "own" | "opponent">, leagueIds: string[
   return sides.has("own") ? "own" : "opponent";
 }
 
-export function VennExplorer({ sets, combos }: { sets: VennSetInfo[]; combos: VennComboInfo[] }) {
+export function VennExplorer({
+  sets,
+  combos,
+}: {
+  sets: VennSetInfo[];
+  combos: VennComboInfo[];
+}) {
   const [selected, setSelected] = useState<string[]>([]);
+  const [search, setSearch] = useState("");
+  const [position, setPosition] = useState("all");
 
   const sideById = new Map(sets.map((s) => [s.leagueId, s.side]));
   const labelById = new Map(sets.map((s) => [s.leagueId, s.label]));
@@ -60,10 +68,6 @@ export function VennExplorer({ sets, combos }: { sets: VennSetInfo[]; combos: Ve
     );
   }
 
-  // Teams that appear in at least one overlap anywhere — everything else is
-  // a permanently dead end and gets greyed out from the start.
-  const teamsWithOverlap = new Set(overlapCombos.flatMap((c) => c.leagueIds));
-
   function matches(selection: string[], leagueIds: string[]): boolean {
     return selection.every((id) => leagueIds.includes(id));
   }
@@ -72,17 +76,7 @@ export function VennExplorer({ sets, combos }: { sets: VennSetInfo[]; combos: Ve
     selected.length === 0 ? [] : overlapCombos.filter((c) => matches(selected, c.leagueIds));
   const matchingPlayerIds = new Set(matchingCombos.flatMap((c) => c.players.map((p) => p.id)));
 
-  // Would adding this candidate to the current selection still hit at least
-  // one real combo? Used to grey out non-viable "next clicks" so the user is
-  // steered toward selections that actually go somewhere.
-  function isViableNext(leagueId: string): boolean {
-    if (selected.includes(leagueId)) return true;
-    const next = [...selected, leagueId];
-    return overlapCombos.some((c) => matches(next, c.leagueIds));
-  }
-
   function toggle(leagueId: string) {
-    if (!teamsWithOverlap.has(leagueId)) return;
     setSelected((prev) =>
       prev.includes(leagueId) ? prev.filter((id) => id !== leagueId) : [...prev, leagueId],
     );
@@ -109,57 +103,81 @@ export function VennExplorer({ sets, combos }: { sets: VennSetInfo[]; combos: Ve
     return b.netValue - a.netValue;
   });
 
+  const positions = Array.from(
+    new Set(entries.map((e) => e.position).filter((p): p is string => !!p)),
+  ).sort();
+
+  const visible = sorted.filter((p) => {
+    if (position !== "all" && p.position !== position) return false;
+    if (search && !p.name.toLowerCase().includes(search.toLowerCase())) return false;
+    return true;
+  });
+
   return (
     <div className="flex flex-col gap-4">
-      <div className="grid grid-cols-[repeat(auto-fill,minmax(6.5rem,1fr))] gap-2">
-        {sets.map((s) => {
-          const hasOverlap = teamsWithOverlap.has(s.leagueId);
-          const isSelected = selected.includes(s.leagueId);
-          const viable = hasOverlap && (isSelected || isViableNext(s.leagueId));
-          const color = hasOverlap ? SIDE_COLOR[s.side] : GREY_COLOR;
-
-          return (
-            <button
-              key={s.leagueId}
-              type="button"
-              disabled={!hasOverlap}
-              onClick={() => toggle(s.leagueId)}
-              title={!hasOverlap ? `${s.label} — no overlap with any other team` : s.label}
-              className={`flex min-h-11 items-center justify-center rounded-lg border-2 px-2 py-1.5 text-center text-xs font-semibold leading-tight outline-none transition-all focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 ${
-                !hasOverlap
-                  ? "cursor-not-allowed opacity-40"
-                  : isSelected
-                    ? "scale-[1.04] shadow-md"
-                    : viable
-                      ? ""
-                      : "opacity-30"
-              }`}
-              style={{
-                borderColor: color,
-                backgroundColor: isSelected ? color : "transparent",
-                color: isSelected ? "#fff" : color,
-                boxShadow: isSelected
-                  ? `0 0 0 3px var(--background), 0 0 0 5px ${color}80`
-                  : undefined,
-              }}
-            >
-              {s.label}
-            </button>
-          );
-        })}
+      <div className="flex flex-wrap items-center gap-2">
+        <input
+          type="text"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search players…"
+          className="min-w-0 flex-1 rounded-lg border border-border bg-card px-3 py-1.5 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+        />
+        <select
+          value={position}
+          onChange={(e) => setPosition(e.target.value)}
+          className="rounded-lg border border-border bg-card px-2 py-1.5 text-sm"
+        >
+          <option value="all">All positions</option>
+          {positions.map((pos) => (
+            <option key={pos} value={pos}>
+              {pos}
+            </option>
+          ))}
+        </select>
       </div>
 
+      {selected.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2 text-sm">
+          <span className="text-muted-foreground">Filtering by:</span>
+          {selected.map((leagueId) => {
+            const color = SIDE_COLOR[sideById.get(leagueId) ?? "own"];
+            return (
+              <button
+                key={leagueId}
+                type="button"
+                onClick={() => toggle(leagueId)}
+                className="inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-semibold text-white transition-opacity hover:opacity-90"
+                style={{ backgroundColor: color }}
+              >
+                {labelById.get(leagueId) ?? leagueId} ✕
+              </button>
+            );
+          })}
+          <button
+            type="button"
+            onClick={() => setSelected([])}
+            className="text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+          >
+            Clear
+          </button>
+        </div>
+      )}
+
+      {visible.length === 0 ? (
+        <p className="rounded-xl border border-dashed border-border p-8 text-center text-sm text-muted-foreground">
+          No players match these filters.
+        </p>
+      ) : (
       <div className="flex flex-col gap-2">
-        {sorted.map((p) => {
+        {visible.map((p) => {
           const isFiltered = selected.length > 0 && !matchingPlayerIds.has(p.id);
           const color = isFiltered ? GREY_COLOR : SIDE_COLOR[p.side];
           return (
-            <button
+            <div
               key={p.id}
-              type="button"
-              onClick={() => setSelected(p.leagueIds)}
-              className="flex flex-col gap-2 rounded-xl border-2 p-3 text-left outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-              style={{ borderColor: color, backgroundColor: `${color}26` }}
+              className="flex flex-col gap-3 rounded-xl border-[3px] bg-card p-4"
+              style={{ borderColor: color }}
             >
               <div className="flex items-center justify-between gap-3">
                 <div className="min-w-0">
@@ -182,24 +200,33 @@ export function VennExplorer({ sets, combos }: { sets: VennSetInfo[]; combos: Ve
                 {p.leagueIds.map((leagueId) => {
                   const isOwn = sideById.get(leagueId) === "own";
                   const label = labelById.get(leagueId) ?? leagueId;
+                  const isSelected = selected.includes(leagueId);
                   return (
-                    <span
+                    <button
                       key={leagueId}
-                      className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold ${
-                        isOwn
-                          ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"
-                          : "bg-red-500/15 text-red-600 dark:text-red-400"
+                      type="button"
+                      onClick={() => toggle(leagueId)}
+                      title={`Filter by ${label}`}
+                      className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 ${
+                        isSelected
+                          ? isOwn
+                            ? "bg-emerald-500 text-white"
+                            : "bg-red-500 text-white"
+                          : isOwn
+                            ? "bg-emerald-500/15 text-emerald-600 hover:bg-emerald-500/25 dark:text-emerald-400"
+                            : "bg-red-500/15 text-red-600 hover:bg-red-500/25 dark:text-red-400"
                       }`}
                     >
                       {isOwn ? "↑" : "↓"} {label}
-                    </span>
+                    </button>
                   );
                 })}
               </div>
-            </button>
+            </div>
           );
         })}
       </div>
+      )}
     </div>
   );
 }

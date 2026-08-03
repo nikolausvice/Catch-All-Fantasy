@@ -4,17 +4,19 @@ import { desc, eq } from "drizzle-orm";
 import { auth } from "@/auth";
 import { db } from "@/db/client";
 import { connectedLeagues } from "@/db/schema";
+import { AnalysisSection } from "@/components/analysis-section";
 import { AvatarImage } from "@/components/avatar-image";
 import { IntelTabs } from "@/components/intel-tabs";
-import { StillPlayingSection } from "@/components/still-playing-section";
 import { VennExplorer } from "@/components/venn-diagram";
 import type { VennComboInfo, VennSetInfo } from "@/components/venn-diagram";
-import { analyzeCrossLeague, computeMatchupWinProb } from "@/lib/leagues/cross-league";
+import { analyzeCrossLeague } from "@/lib/leagues/cross-league";
+import { getNflGameStatuses, type GameStatus } from "@/lib/leagues/nfl-schedule";
 import {
   buildRosterSets,
   computeOverlapCombos,
   type LeagueRosterSet,
 } from "@/lib/leagues/roster-overlap";
+import { getScoreOverrides } from "@/lib/leagues/score-overrides";
 import { getCurrentNflWeek } from "@/lib/leagues/week";
 import { loadMatchup } from "./_load-matchup";
 import type { LeagueMatchup } from "@/lib/leagues/types";
@@ -23,6 +25,7 @@ const PLATFORM_LABEL: Record<string, string> = {
   sleeper: "Sleeper",
   espn: "ESPN",
   yahoo: "Yahoo",
+  demo: "Demo",
 };
 
 // Own + opponent teams share this cap, so it needs to cover roughly double
@@ -100,59 +103,52 @@ function toOverlapViewData(
 
 // ── Matchups tab ─────────────────────────────────────────────────────────────
 
-function TeamScore({
+function TeamRow({
   name,
   avatarUrl,
   score,
   projectedScore,
-  emphasized,
-  reversed,
+  isBye,
 }: {
   name: string;
   avatarUrl: string | null;
   score: number | null;
   projectedScore?: number;
-  emphasized?: boolean;
-  reversed?: boolean;
+  isBye?: boolean;
 }) {
   return (
-    <div className={`flex min-w-0 flex-1 items-center gap-2 ${reversed ? "flex-row-reverse" : ""}`}>
-      <AvatarImage
-        name={name}
-        avatarUrl={avatarUrl}
-        className="size-8 shrink-0 rounded-md"
-        fallbackClassName="flex size-8 shrink-0 items-center justify-center rounded-md bg-muted text-xs font-medium text-muted-foreground"
-      />
-      <div className={`min-w-0 ${reversed ? "text-right" : ""}`}>
-        <p className="truncate text-sm font-medium">{name}</p>
-        {score != null && (
-          <p
-            className={
-              emphasized
-                ? "text-xs font-medium text-foreground"
-                : "text-xs text-muted-foreground"
-            }
-          >
-            {score.toFixed(1)}
-            {projectedScore != null && (
-              <span className="text-muted-foreground/50"> (proj {projectedScore.toFixed(1)})</span>
-            )}
-          </p>
+    <div className="flex items-center justify-between gap-3">
+      <div className="flex min-w-0 flex-1 items-center gap-2.5">
+        {isBye ? (
+          <div className="flex size-9 shrink-0 items-center justify-center rounded-md bg-muted text-xs font-medium text-muted-foreground">
+            –
+          </div>
+        ) : (
+          <AvatarImage
+            name={name}
+            avatarUrl={avatarUrl}
+            className="size-9 shrink-0 rounded-md"
+            fallbackClassName="flex size-9 shrink-0 items-center justify-center rounded-md bg-muted text-xs font-medium text-muted-foreground"
+          />
         )}
+        <div className="min-w-0">
+          <p className={`truncate text-sm font-medium ${isBye ? "text-muted-foreground" : ""}`}>
+            {name}
+          </p>
+          {projectedScore != null && (
+            <p className="truncate text-[11px] text-muted-foreground">
+              proj {projectedScore.toFixed(1)}
+            </p>
+          )}
+        </div>
       </div>
-    </div>
-  );
-}
-
-function ByePlaceholder({ reversed }: { reversed?: boolean }) {
-  return (
-    <div className={`flex min-w-0 flex-1 items-center gap-2 ${reversed ? "flex-row-reverse" : ""}`}>
-      <div className="flex size-8 shrink-0 items-center justify-center rounded-md bg-muted text-xs font-medium text-muted-foreground">
-        –
-      </div>
-      <div className={`min-w-0 ${reversed ? "text-right" : ""}`}>
-        <p className="truncate text-sm font-medium text-muted-foreground">Bye</p>
-      </div>
+      <p
+        className={`shrink-0 text-2xl font-bold tabular-nums ${
+          isBye ? "text-muted-foreground/40" : ""
+        }`}
+      >
+        {score != null ? score.toFixed(1) : "–"}
+      </p>
     </div>
   );
 }
@@ -186,17 +182,6 @@ function MatchupCard({
           : "tied"
       : null;
 
-  const winProb = computeMatchupWinProb(matchup);
-  const winPct = Math.round(winProb.winProbability * 100);
-  const winBarColor =
-    winPct >= 60 ? "bg-emerald-500" : winPct <= 40 ? "bg-red-500" : "bg-amber-400";
-  const winTextColor =
-    winPct >= 60
-      ? "text-emerald-500"
-      : winPct <= 40
-        ? "text-red-500"
-        : "text-amber-500";
-
   return (
     <Link
       href={`/dashboard/leagues/${league.id}`}
@@ -210,65 +195,39 @@ function MatchupCard({
           {PLATFORM_LABEL[league.platform] ?? league.platform} · Wk {matchup.week}
         </span>
       </div>
-      <div className="flex items-center justify-between gap-3">
-        <TeamScore
-          name={matchup.team.name}
-          avatarUrl={matchup.team.avatarUrl}
-          score={matchup.teamScore}
-          projectedScore={matchup.teamProjectedScore}
-          emphasized
-        />
-        <span className="shrink-0 text-xs font-semibold uppercase text-muted-foreground">
-          vs
-        </span>
-        {matchup.opponent ? (
-          <TeamScore
-            name={matchup.opponent.name}
-            avatarUrl={matchup.opponent.avatarUrl}
-            score={matchup.opponentScore}
-            projectedScore={matchup.opponentProjectedScore}
-            reversed
-          />
-        ) : (
-          <ByePlaceholder reversed />
-        )}
+      <TeamRow
+        name={matchup.team.name}
+        avatarUrl={matchup.team.avatarUrl}
+        score={matchup.teamScore}
+        projectedScore={matchup.teamProjectedScore}
+      />
+
+      <div className="my-2 flex items-center gap-2">
+        <div className="h-px flex-1 bg-border" />
+        <span className="text-[10px] font-semibold uppercase text-muted-foreground">vs</span>
+        <div className="h-px flex-1 bg-border" />
       </div>
-      <div className="mt-3 flex items-center gap-2">
-        <div className="relative h-1.5 flex-1 overflow-hidden rounded-full bg-muted">
-          {!winProb.isBye && (
-            <div
-              className={`absolute inset-y-0 left-0 rounded-full transition-all ${winBarColor}`}
-              style={{ width: `${winPct}%` }}
-            />
-          )}
-        </div>
-        <span
-          className={`w-9 shrink-0 text-right text-xs font-bold tabular-nums ${
-            winProb.isBye ? "text-muted-foreground" : winTextColor
+
+      {matchup.opponent ? (
+        <TeamRow
+          name={matchup.opponent.name}
+          avatarUrl={matchup.opponent.avatarUrl}
+          score={matchup.opponentScore}
+          projectedScore={matchup.opponentProjectedScore}
+        />
+      ) : (
+        <TeamRow name="Bye" avatarUrl={null} score={null} isBye />
+      )}
+
+      {(result === "winning" || result === "losing") && (
+        <p
+          className={`mt-2 text-xs font-medium ${
+            result === "winning" ? "text-primary" : "text-destructive"
           }`}
         >
-          {winProb.isBye ? "Bye" : `${winPct}%`}
-        </span>
-      </div>
-      <p
-        className={
-          result === "winning"
-            ? "mt-2 text-xs font-medium text-primary"
-            : result === "losing"
-              ? "mt-2 text-xs font-medium text-destructive"
-              : result === "tied"
-                ? "mt-2 text-xs font-medium text-muted-foreground"
-                : "mt-2 text-xs font-medium text-muted-foreground/0"
-        }
-      >
-        {result === "winning"
-          ? "You're winning"
-          : result === "losing"
-            ? "You're behind"
-            : result === "tied"
-              ? "Tied"
-              : " "}
-      </p>
+          {result === "winning" ? "You're winning" : "You're behind"}
+        </p>
+      )}
     </Link>
   );
 }
@@ -351,13 +310,18 @@ export default async function DashboardPage() {
   const ready = leagues.filter((league) => league.userTeamId);
 
   const week = ready.length > 0 ? await getCurrentNflWeek() : 0;
+  const season = Number(ready.find((l) => l.platform !== "demo")?.season) || new Date().getFullYear();
+  const statusByTeam: Map<string, GameStatus> =
+    week > 0 ? await getNflGameStatuses(season, week) : new Map();
+  const scoreOverrides = await getScoreOverrides(userId);
+
   const matchups = await Promise.all(
     ready.map(async (league) => ({
       leagueId: league.id,
       leagueName: league.leagueName,
       platform: league.platform,
       league,
-      ...(await loadMatchup(league, userId, week)),
+      ...(await loadMatchup(league, userId, week, scoreOverrides)),
     })),
   );
 
@@ -368,25 +332,17 @@ export default async function DashboardPage() {
       platform,
       matchup,
     })),
+    statusByTeam,
   );
 
   const ownRosterSets = buildRosterSets(matchups, "own");
   const opponentRosterSets = buildRosterSets(matchups, "opponent");
   const overlap = toOverlapViewData(ownRosterSets, opponentRosterSets);
 
-  const hasData = analysis.winProbabilities.length > 0;
-  const sweepPct = Math.round(analysis.probAllWins * 100);
   const failedLeagues = matchups.filter((m) => m.error);
 
   return (
     <div className="flex flex-col gap-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Cross League Intel</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Every league you&apos;re playing in, compared side by side.
-        </p>
-      </div>
-
       {failedLeagues.length > 0 && (
         <div className="rounded-xl border border-destructive/30 bg-destructive/10 p-4 text-sm text-destructive">
           <p className="font-medium">
@@ -410,38 +366,15 @@ export default async function DashboardPage() {
         </div>
       ) : (
         <IntelTabs
-          stillPlayingCount={analysis.remainingPlayers.length}
           overview={
             <Fragment key="overview">
-              {hasData && analysis.totalMatchups > 1 && (
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="rounded-xl border border-border bg-card p-5 text-center">
-                    <p
-                      className={`text-4xl font-bold tabular-nums ${
-                        sweepPct >= 50 ? "text-emerald-500" : "text-red-500"
-                      }`}
-                    >
-                      {sweepPct}%
-                    </p>
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      sweep all {analysis.totalMatchups}
-                    </p>
-                  </div>
-                  <div className="rounded-xl border border-border bg-card p-5 text-center">
-                    <p className="text-4xl font-bold tabular-nums">
-                      {analysis.expectedWins.toFixed(1)}
-                    </p>
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      expected wins
-                    </p>
-                  </div>
-                </div>
-              )}
               <MatchupsTab needsSetup={needsSetup} matchups={matchups} />
             </Fragment>
           }
-          stillPlaying={<StillPlayingSection players={analysis.remainingPlayers} />}
-          rootingAndOverlap={<VennExplorer sets={overlap.sets} combos={overlap.combos} />}
+          rootingAndOverlap={
+            <VennExplorer sets={overlap.sets} combos={overlap.combos} />
+          }
+          analysis={<AnalysisSection analysis={analysis} />}
         />
       )}
     </div>

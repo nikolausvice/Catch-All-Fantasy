@@ -13,6 +13,8 @@ export interface LeagueTeamPlayer {
    * this indicates the player hasn't yet played and is still projected to score.
    */
   projectedPoints?: number;
+  /** True/false when the platform exposes experience data (currently Sleeper only); undefined = unknown. */
+  isRookie?: boolean;
 }
 
 export interface LeagueTeam {

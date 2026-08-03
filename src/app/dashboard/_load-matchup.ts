@@ -4,6 +4,8 @@ import { platformIdentities, connectedLeagues } from "@/db/schema";
 import { tryDecryptSecret } from "@/lib/crypto/secrets";
 import { EspnApiError } from "@/lib/espn/client";
 import { getCachedEspnTeamMatchup, getCachedSleeperTeamMatchup } from "@/lib/leagues/cache";
+import { computeDemoMatchup } from "@/lib/leagues/demo";
+import { applyScoreOverrides } from "@/lib/leagues/score-overrides";
 import { SleeperApiError } from "@/lib/sleeper/client";
 import type { LeagueMatchup } from "@/lib/leagues/types";
 
@@ -13,15 +15,26 @@ export async function loadMatchup(
   league: LeagueRow,
   userId: string,
   week: number,
+  scoreOverrides: Map<string, number>,
 ): Promise<{ matchup: LeagueMatchup | null; error: string | null }> {
   try {
-    if (league.platform === "sleeper") {
+    if (league.platform === "demo") {
       return {
-        matchup: await getCachedSleeperTeamMatchup(
-          league.platformLeagueId,
-          league.userTeamId!,
-          week,
-        ),
+        matchup: league.demoRoster
+          ? computeDemoMatchup(applyScoreOverrides(league.demoRoster, scoreOverrides))
+          : null,
+        error: league.demoRoster ? null : "This demo league has no roster data yet.",
+      };
+    }
+
+    if (league.platform === "sleeper") {
+      const matchup = await getCachedSleeperTeamMatchup(
+        league.platformLeagueId,
+        league.userTeamId!,
+        week,
+      );
+      return {
+        matchup: matchup ? applyScoreOverrides(matchup, scoreOverrides) : matchup,
         error: null,
       };
     }
@@ -47,14 +60,15 @@ export async function loadMatchup(
         }
       }
 
+      const matchup = await getCachedEspnTeamMatchup(
+        Number(league.platformLeagueId),
+        Number(league.season),
+        league.userTeamId!,
+        espnS2,
+        swid,
+      );
       return {
-        matchup: await getCachedEspnTeamMatchup(
-          Number(league.platformLeagueId),
-          Number(league.season),
-          league.userTeamId!,
-          espnS2,
-          swid,
-        ),
+        matchup: matchup ? applyScoreOverrides(matchup, scoreOverrides) : matchup,
         error: null,
       };
     }

@@ -1,12 +1,15 @@
 import {
   integer,
+  jsonb,
   pgTable,
   primaryKey,
+  real,
   text,
   timestamp,
   uniqueIndex,
 } from "drizzle-orm/pg-core";
 import type { AdapterAccountType } from "next-auth/adapters";
+import type { LeagueMatchup } from "@/lib/leagues/types";
 
 export const users = pgTable("user", {
   id: text("id")
@@ -73,7 +76,7 @@ export const platformIdentities = pgTable(
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
     platform: text("platform")
-      .$type<"sleeper" | "espn" | "yahoo">()
+      .$type<"sleeper" | "espn" | "yahoo" | "demo">()
       .notNull(),
     platformUserId: text("platformUserId").notNull(),
     platformUsername: text("platformUsername"),
@@ -102,7 +105,7 @@ export const connectedLeagues = pgTable(
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
     platform: text("platform")
-      .$type<"sleeper" | "espn" | "yahoo">()
+      .$type<"sleeper" | "espn" | "yahoo" | "demo">()
       .notNull(),
     platformLeagueId: text("platformLeagueId").notNull(),
     platformUserId: text("platformUserId"),
@@ -114,6 +117,8 @@ export const connectedLeagues = pgTable(
     userTeamId: text("userTeamId"),
     /** Denormalized so the dashboard can show it without refetching from the platform. */
     userTeamName: text("userTeamName"),
+    /** Editable fake roster + scores for platform "demo" — lets you hand-tune player points to see how the probabilities react. */
+    demoRoster: jsonb("demoRoster").$type<LeagueMatchup>(),
     createdAt: timestamp("createdAt", { mode: "date" })
       .notNull()
       .$defaultFn(() => new Date()),
@@ -124,5 +129,35 @@ export const connectedLeagues = pgTable(
       table.platform,
       table.platformLeagueId,
     ),
+  ],
+);
+
+/**
+ * A hand-typed score from the demo editor, applied on top of every league
+ * (demo or real) where this same real-world player is rostered — keyed by
+ * normalized name+position rather than any platform's own player id, since
+ * that's the only identity shared across Sleeper/ESPN/demo. Deleting the row
+ * un-overrides the player, letting the platform's own live data (or the demo
+ * roster's stored value) be authoritative again.
+ */
+export const playerScoreOverrides = pgTable(
+  "player_score_overrides",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    userId: text("userId")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    /** normalizePlayerKey(name, position) from roster-overlap.ts. */
+    playerKey: text("playerKey").notNull(),
+    playerName: text("playerName").notNull(),
+    points: real("points").notNull(),
+    updatedAt: timestamp("updatedAt", { mode: "date" })
+      .notNull()
+      .$defaultFn(() => new Date()),
+  },
+  (table) => [
+    uniqueIndex("player_score_overrides_user_key_idx").on(table.userId, table.playerKey),
   ],
 );

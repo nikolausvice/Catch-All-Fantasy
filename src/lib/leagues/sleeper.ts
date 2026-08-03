@@ -123,6 +123,7 @@ function buildSleeperTeam({
       slot: slotIndex !== undefined ? (slotPositions[slotIndex] ?? "BN") : "BN",
       points: pts !== undefined ? pts : undefined,
       projectedPoints: proj !== undefined ? proj : undefined,
+      isRookie: player?.years_exp != null ? player.years_exp === 0 : undefined,
     };
   }
 

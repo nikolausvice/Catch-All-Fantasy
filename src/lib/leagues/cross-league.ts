@@ -1,3 +1,5 @@
+import { type GameStatus, normalizeTeamAbbrev } from "./nfl-schedule";
+import { normalizePlayerKey } from "./roster-overlap";
 import type { LeagueMatchup, LeagueTeamPlayer } from "./types";
 
 // ---------------------------------------------------------------------------
@@ -65,6 +67,8 @@ export interface RemainingPlayerAnalysis {
   position: string | null;
   proTeam: string | null;
   projectedPoints: number;
+  /** Their current (live) score, if any context has reported one. */
+  currentPoints: number;
   /** Per-league impact for this player. */
   leagues: {
     leagueName: string;
@@ -79,6 +83,15 @@ export interface RemainingPlayerAnalysis {
     /** Whether you're currently on track to win this league without this player. */
     winningWithout: boolean;
     description: string;
+    /**
+     * True only when this player is the SOLE remaining starter (either side)
+     * in this league — meaning breakEvenPoints is an exact, guaranteed
+     * threshold. When other starters are also still to play, their own
+     * variance can swing the league regardless of what this player does, so
+     * the threshold here is only an estimate that assumes everyone else
+     * hits their projection exactly.
+     */
+    isExact: boolean;
   }[];
   /**
    * True when the player is your starter in some leagues but opponent's
@@ -90,6 +103,14 @@ export interface RemainingPlayerAnalysis {
    * leagues simultaneously. null if no feasible sweet spot exists.
    */
   sweetSpot: { min: number; max: number } | null;
+  /** True only when every league behind the sweet spot has this player as its last remaining starter. */
+  sweetSpotIsExact: boolean;
+  /**
+   * The full breakdown: every score band this player's final tally could
+   * land in, and the resulting win-loss record across every league they
+   * affect (e.g. "2-0", "1-1", "0-2"). Empty when there's no conflict.
+   */
+  recordBands: { min: number; max: number | null; wins: number; losses: number }[];
 }
 
 export interface CrossLeagueAnalysis {
@@ -103,6 +124,8 @@ export interface CrossLeagueAnalysis {
   /** Product of individual win probs for active (non-bye) matchups. */
   probAllWins: number;
   totalMatchups: number;
+  /** P(exactly k wins) for k = 0..totalMatchups, index = k. */
+  winCountDistribution: number[];
 }
 
 // ---------------------------------------------------------------------------
@@ -136,12 +159,17 @@ function normalCdf(z: number): number {
  * fantasy scoring variance. Players who've already played (or have no
  * projection) contribute no variance — their score is locked in.
  */
-function remainingVariance(players: LeagueTeamPlayer[]): number {
+function remainingVariance(
+  players: LeagueTeamPlayer[],
+  statusByTeam?: Map<string, GameStatus>,
+): number {
   const VARIANCE_COEFF = 0.45;
-  return players.filter(isRemaining).reduce((sum, p) => {
-    const sd = (p.projectedPoints ?? 0) * VARIANCE_COEFF;
-    return sum + sd * sd;
-  }, 0);
+  return players
+    .filter((p) => isRemaining(p, statusByTeam))
+    .reduce((sum, p) => {
+      const sd = (p.projectedPoints ?? 0) * VARIANCE_COEFF;
+      return sum + sd * sd;
+    }, 0);
 }
 
 /**
@@ -153,7 +181,10 @@ function remainingVariance(players: LeagueTeamPlayer[]): number {
  * toward 0/100% as players finish). Falls back to a live-score-only
  * logistic when no projections exist at all.
  */
-export function computeMatchupWinProb(matchup: LeagueMatchup): {
+export function computeMatchupWinProb(
+  matchup: LeagueMatchup,
+  statusByTeam?: Map<string, GameStatus>,
+): {
   currentMargin: number | null;
   projectedMargin: number | null;
   winProbability: number;
@@ -175,8 +206,8 @@ export function computeMatchupWinProb(matchup: LeagueMatchup): {
   if (isBye) {
     winProbability = 1;
   } else if (projectedMargin != null) {
-    const varMe = remainingVariance(matchup.team.players);
-    const varOpp = matchup.opponent ? remainingVariance(matchup.opponent.players) : 0;
+    const varMe = remainingVariance(matchup.team.players, statusByTeam);
+    const varOpp = matchup.opponent ? remainingVariance(matchup.opponent.players, statusByTeam) : 0;
     // Floor so a matchup with nothing left to play doesn't collapse to a
     // hard 0%/100% — there's always a little residual uncertainty (stat
     // corrections, DST/K scoring the proxy above doesn't model well, etc).
@@ -203,12 +234,204 @@ function playerKey(platform: string, playerId: string): string {
   return `${platform}:${playerId}`;
 }
 
-function isRemaining(p: LeagueTeamPlayer): boolean {
-  return (
-    p.isStarter &&
-    (p.points ?? 0) === 0 &&
-    (p.projectedPoints ?? 0) > 0
-  );
+/**
+ * Whether a starter's final score isn't locked in yet. Zero fantasy points
+ * looks identical whether a player hasn't played or has already played and
+ * scored nothing, so when a real NFL game-status map is available, prefer
+ * it: "post" (game over) means their score is final even if it's 0; "pre"
+ * or "in" means it isn't, even if their live points somehow read nonzero
+ * (stat corrections). Falls back to the old zero-points proxy when no
+ * schedule data is available (e.g. demo leagues, or a lookup miss).
+ */
+function isRemaining(p: LeagueTeamPlayer, statusByTeam?: Map<string, GameStatus>): boolean {
+  if (!p.isStarter) return false;
+  if (statusByTeam) {
+    const status = statusByTeam.get(normalizeTeamAbbrev(p.proTeam));
+    if (status === "post") return false;
+    if (status === "pre" || status === "in") return (p.projectedPoints ?? 0) > 0;
+    // No schedule entry — team is on a bye, or the lookup missed. Fall
+    // through to the proxy below.
+  }
+  return (p.points ?? 0) === 0 && (p.projectedPoints ?? 0) > 0;
+}
+
+/**
+ * Same idea as isRemaining, but excludes players whose game is already
+ * underway ("in") — used only by the simulation below, where a mid-game
+ * player's current live points are already part of matchup.teamScore
+ * (locked). Treating them as remaining there would draw their whole
+ * projection on top of points already counted, double-counting them.
+ */
+function isNotYetStarted(p: LeagueTeamPlayer, statusByTeam?: Map<string, GameStatus>): boolean {
+  if (!p.isStarter) return false;
+  if (statusByTeam) {
+    const status = statusByTeam.get(normalizeTeamAbbrev(p.proTeam));
+    if (status === "post" || status === "in") return false;
+    if (status === "pre") return (p.projectedPoints ?? 0) > 0;
+  }
+  return (p.points ?? 0) === 0 && (p.projectedPoints ?? 0) > 0;
+}
+
+/**
+ * Partitions a conflicted player's possible final score into bands and
+ * reports the resulting win-loss record (across every league they affect)
+ * in each — e.g. "0.0–12.4 pts → 0-2", "12.4–18.6 → 1-1", "18.6+ → 2-0".
+ * Each "your" league contributes a "need >= x to win" threshold; each "opp"
+ * league contributes a "need <= y to win" threshold. Sorting the union of
+ * thresholds splits the score axis into segments with a constant win/loss
+ * count; adjacent segments with an identical record are merged. Not floored
+ * at 0 — see the sweet-spot comment above for why negative bands are real.
+ */
+function computeRecordBands(
+  yourLeagues: RemainingPlayerAnalysis["leagues"],
+  oppLeagues: RemainingPlayerAnalysis["leagues"],
+): { min: number; max: number | null; wins: number; losses: number }[] {
+  const thresholds = new Set<number>([0]);
+  for (const l of yourLeagues) thresholds.add(l.breakEvenPoints ?? 0);
+  for (const l of oppLeagues) thresholds.add(l.breakEvenPoints ?? 0);
+  const points = [...thresholds].sort((a, b) => a - b);
+
+  function outcomeAt(testScore: number): { wins: number; losses: number } {
+    let wins = 0;
+    let losses = 0;
+    for (const l of yourLeagues) {
+      if (testScore >= (l.breakEvenPoints ?? 0)) wins++;
+      else losses++;
+    }
+    for (const l of oppLeagues) {
+      if (testScore <= (l.breakEvenPoints ?? 0)) wins++;
+      else losses++;
+    }
+    return { wins, losses };
+  }
+
+  const raw: { min: number; max: number | null; wins: number; losses: number }[] = [];
+  for (let i = 0; i < points.length; i++) {
+    const min = points[i];
+    const max = i + 1 < points.length ? points[i + 1] : null;
+    const testScore = max != null ? (min + max) / 2 : min + Math.max(1, Math.abs(min) * 0.1);
+    raw.push({ min, max, ...outcomeAt(testScore) });
+  }
+
+  const merged: typeof raw = [];
+  for (const band of raw) {
+    const prev = merged[merged.length - 1];
+    if (prev && prev.wins === band.wins && prev.losses === band.losses) {
+      prev.max = band.max;
+    } else {
+      merged.push(band);
+    }
+  }
+  return merged;
+}
+
+/** Box-Muller standard normal sample. */
+function gaussianRandom(): number {
+  const u1 = Math.random() || Number.EPSILON;
+  const u2 = Math.random();
+  return Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
+}
+
+const SIM_TRIALS = 10000;
+const VARIANCE_COEFF = 0.45; // same rough single-player weekly-variance figure as remainingVariance
+const FLOOR_SD = 3; // same residual-uncertainty floor as computeMatchupWinProb
+
+interface SimLeague {
+  lockedMine: number;
+  lockedOpp: number;
+  remainingMineKeys: string[];
+  remainingOppKeys: string[];
+}
+
+/**
+ * Monte Carlo joint-outcome simulation across all active (non-bye) leagues.
+ *
+ * The naive way to combine per-league win probabilities into "P(win all N)"
+ * is to multiply them, treating each league as independent. That's wrong
+ * whenever leagues share a player: if scoring 20+ points wins League A but
+ * the same player scoring 20+ means they scored low in whatever stat wins
+ * League B for an opponent who also starts them... more concretely, if a
+ * shared player being your starter in one league and an opponent's starter
+ * in another means one league's win literally requires the outcome the
+ * other league's loss requires, the two leagues are anti-correlated —
+ * sweeping both should be rarer (down to ~0% in a perfectly-opposed case)
+ * than independence would suggest.
+ *
+ * This simulates each *unique real player* (matched the same way as
+ * cross-league roster similarity: normalized name + position) exactly once
+ * per trial, and reuses that single draw everywhere the player is rostered
+ * as a remaining starter — your team in one league, an opponent's team in
+ * another — so correlated/anti-correlated outcomes fall out naturally
+ * instead of being assumed away.
+ */
+function simulateJointOutcomes(
+  matchupResults: { leagueId: string; platform: string; matchup: LeagueMatchup | null }[],
+  statusByTeam?: Map<string, GameStatus>,
+): { winCountDistribution: number[]; expectedWins: number; probAllWins: number } {
+  const leagues: SimLeague[] = [];
+  const players = new Map<string, { mean: number; sd: number }>();
+
+  function registerPlayer(p: LeagueTeamPlayer): string {
+    const key = normalizePlayerKey(p.name, p.position);
+    const mean = p.projectedPoints ?? 0;
+    const existing = players.get(key);
+    if (!existing || mean > existing.mean) {
+      players.set(key, { mean, sd: mean * VARIANCE_COEFF });
+    }
+    return key;
+  }
+
+  for (const { platform, matchup } of matchupResults) {
+    if (!matchup || !matchup.opponent) continue;
+    // Demo leagues are hand-edited fake data — a real NFL team's live game
+    // status shouldn't override the score the user actually typed in.
+    const status = platform === "demo" ? undefined : statusByTeam;
+    leagues.push({
+      lockedMine: matchup.teamScore ?? 0,
+      lockedOpp: matchup.opponentScore ?? 0,
+      remainingMineKeys: matchup.team.players
+        .filter((p) => isNotYetStarted(p, status))
+        .map(registerPlayer),
+      remainingOppKeys: matchup.opponent.players
+        .filter((p) => isNotYetStarted(p, status))
+        .map(registerPlayer),
+    });
+  }
+
+  if (leagues.length === 0) {
+    return { winCountDistribution: [1], expectedWins: 0, probAllWins: 1 };
+  }
+
+  const playerEntries = [...players.entries()];
+  const winCounts = new Array(leagues.length + 1).fill(0);
+  let totalWins = 0;
+  let sweepCount = 0;
+
+  for (let trial = 0; trial < SIM_TRIALS; trial++) {
+    const draws = new Map<string, number>();
+    for (const [key, { mean, sd }] of playerEntries) {
+      draws.set(key, Math.max(0, mean + gaussianRandom() * sd));
+    }
+
+    let wins = 0;
+    for (const league of leagues) {
+      const mineExtra = league.remainingMineKeys.reduce((s, k) => s + (draws.get(k) ?? 0), 0);
+      const oppExtra = league.remainingOppKeys.reduce((s, k) => s + (draws.get(k) ?? 0), 0);
+      const finalMine = league.lockedMine + mineExtra + gaussianRandom() * FLOOR_SD;
+      const finalOpp = league.lockedOpp + oppExtra + gaussianRandom() * FLOOR_SD;
+      if (finalMine > finalOpp) wins++;
+    }
+
+    winCounts[wins]++;
+    totalWins += wins;
+    if (wins === leagues.length) sweepCount++;
+  }
+
+  return {
+    winCountDistribution: winCounts.map((c) => c / SIM_TRIALS),
+    expectedWins: totalWins / SIM_TRIALS,
+    probAllWins: sweepCount / SIM_TRIALS,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -222,6 +445,7 @@ export function analyzeCrossLeague(
     platform: string;
     matchup: LeagueMatchup | null;
   }[],
+  statusByTeam?: Map<string, GameStatus>,
 ): CrossLeagueAnalysis {
   // ── 1. Win probabilities ────────────────────────────────────────────────
 
@@ -230,8 +454,11 @@ export function analyzeCrossLeague(
   for (const { leagueId, leagueName, platform, matchup } of matchupResults) {
     if (!matchup) continue;
 
+    // Demo leagues are hand-edited fake data — don't let a real NFL team's
+    // live game status override the score the user actually typed in.
+    const status = platform === "demo" ? undefined : statusByTeam;
     const { currentMargin, projectedMargin, winProbability, isBye } =
-      computeMatchupWinProb(matchup);
+      computeMatchupWinProb(matchup, status);
 
     winProbabilities.push({
       leagueId,
@@ -334,22 +561,24 @@ export function analyzeCrossLeague(
     oppProj: number; // projected final for opponent
   };
   const leagueProjData = new Map<string, LeagueProjData>();
+  // How many starters (either side) still haven't played in each league —
+  // a break-even threshold is only an exact guarantee when this is 1 (i.e.
+  // this player is the very last one left to play in that league).
+  const remainingCountByLeague = new Map<string, number>();
 
-  for (const { leagueId, matchup } of matchupResults) {
+  for (const { leagueId, platform, matchup } of matchupResults) {
     if (!matchup || !matchup.opponent) continue;
+    const status = platform === "demo" ? undefined : statusByTeam;
+    const myRemaining = matchup.team.players.filter((p) => isRemaining(p, status));
+    const oppRemaining = matchup.opponent.players.filter((p) => isRemaining(p, status));
+    remainingCountByLeague.set(leagueId, myRemaining.length + oppRemaining.length);
     leagueProjData.set(leagueId, {
       myProj:
         matchup.teamProjectedScore ??
-        (matchup.teamScore ?? 0) +
-          matchup.team.players
-            .filter(isRemaining)
-            .reduce((s, p) => s + (p.projectedPoints ?? 0), 0),
+        (matchup.teamScore ?? 0) + myRemaining.reduce((s, p) => s + (p.projectedPoints ?? 0), 0),
       oppProj:
         matchup.opponentProjectedScore ??
-        (matchup.opponentScore ?? 0) +
-          matchup.opponent.players
-            .filter(isRemaining)
-            .reduce((s, p) => s + (p.projectedPoints ?? 0), 0),
+        (matchup.opponentScore ?? 0) + oppRemaining.reduce((s, p) => s + (p.projectedPoints ?? 0), 0),
     });
   }
 
@@ -360,10 +589,11 @@ export function analyzeCrossLeague(
     if (!matchup || !matchup.opponent) continue;
     const proj = leagueProjData.get(leagueId);
     if (!proj) continue;
+    const status = platform === "demo" ? undefined : statusByTeam;
 
     // My remaining starters
     for (const player of matchup.team.players) {
-      if (!isRemaining(player)) continue;
+      if (!isRemaining(player, status)) continue;
       const pProj = player.projectedPoints!;
       const key = playerKey(platform, player.id);
 
@@ -387,14 +617,18 @@ export function analyzeCrossLeague(
           position: player.position,
           proTeam: player.proTeam,
           projectedPoints: pProj,
+          currentPoints: player.points ?? 0,
           leagues: [],
           hasConflict: false,
           sweetSpot: null,
+          sweetSpotIsExact: false,
+          recordBands: [],
         };
         remainingByPlayer.set(key, entry);
       }
-      // Update to highest projection seen
+      // Update to highest projection/current-points seen
       if (pProj > entry.projectedPoints) entry.projectedPoints = pProj;
+      if ((player.points ?? 0) > entry.currentPoints) entry.currentPoints = player.points ?? 0;
 
       entry.leagues.push({
         leagueName,
@@ -403,13 +637,14 @@ export function analyzeCrossLeague(
         breakEvenPoints: breakEven,
         winningWithout,
         description: desc,
+        isExact: remainingCountByLeague.get(leagueId) === 1,
       });
     }
 
     // Opponent's remaining starters
     if (matchup.opponent) {
       for (const player of matchup.opponent.players) {
-        if (!isRemaining(player)) continue;
+        if (!isRemaining(player, status)) continue;
         const pProj = player.projectedPoints!;
         const key = playerKey(platform, player.id);
 
@@ -434,13 +669,17 @@ export function analyzeCrossLeague(
             position: player.position,
             proTeam: player.proTeam,
             projectedPoints: pProj,
+            currentPoints: player.points ?? 0,
             leagues: [],
             hasConflict: false,
             sweetSpot: null,
+            sweetSpotIsExact: false,
+            recordBands: [],
           };
           remainingByPlayer.set(key, entry);
         }
         if (pProj > entry.projectedPoints) entry.projectedPoints = pProj;
+        if ((player.points ?? 0) > entry.currentPoints) entry.currentPoints = player.points ?? 0;
 
         entry.leagues.push({
           leagueName,
@@ -449,6 +688,7 @@ export function analyzeCrossLeague(
           breakEvenPoints: maxAllowed,
           winningWithout,
           description: desc,
+          isExact: remainingCountByLeague.get(leagueId) === 1,
         });
       }
     }
@@ -462,11 +702,10 @@ export function analyzeCrossLeague(
     if (yourLeagues.length > 0 && oppLeagues.length > 0) {
       entry.hasConflict = true;
 
-      // Sweet spot: [max of all your minimums, min of all opp maximums]
-      const minNeeded = Math.max(
-        0,
-        ...yourLeagues.map((l) => l.breakEvenPoints ?? 0),
-      );
+      // Sweet spot: [max of all your minimums, min of all opp maximums].
+      // Not floored at 0 — a genuinely negative threshold ("you're covered
+      // even if they bomb") is real information, not noise.
+      const minNeeded = Math.max(...yourLeagues.map((l) => l.breakEvenPoints ?? 0));
       const maxAllowed = Math.min(
         entry.projectedPoints * 2, // generous upper cap
         ...oppLeagues.map((l) => l.breakEvenPoints ?? entry.projectedPoints * 2),
@@ -474,6 +713,9 @@ export function analyzeCrossLeague(
 
       entry.sweetSpot =
         minNeeded <= maxAllowed ? { min: minNeeded, max: maxAllowed } : null;
+      entry.sweetSpotIsExact =
+        yourLeagues.every((l) => l.isExact) && oppLeagues.every((l) => l.isExact);
+      entry.recordBands = computeRecordBands(yourLeagues, oppLeagues);
     }
   }
 
@@ -490,14 +732,8 @@ export function analyzeCrossLeague(
   // Bye leagues have no matchup to win — excluded here (and from probAllWins/
   // totalMatchups below) so they don't get counted as a free guaranteed win.
   const activeMatchups = winProbabilities.filter((w) => !w.isBye);
-  const expectedWins = activeMatchups.reduce(
-    (sum, w) => sum + w.winProbability,
-    0,
-  );
-  const probAllWins =
-    activeMatchups.length === 0
-      ? 1
-      : activeMatchups.reduce((prod, w) => prod * w.winProbability, 1);
+  const { winCountDistribution, expectedWins, probAllWins } =
+    simulateJointOutcomes(matchupResults, statusByTeam);
 
   return {
     winProbabilities,
@@ -506,5 +742,6 @@ export function analyzeCrossLeague(
     expectedWins,
     probAllWins,
     totalMatchups: activeMatchups.length,
+    winCountDistribution,
   };
 }

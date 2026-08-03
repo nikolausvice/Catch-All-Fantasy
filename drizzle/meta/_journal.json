@@ -8,6 +8,13 @@
       "when": 1785509669661,
       "tag": "0000_awesome_patch",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1785792949362,
+      "tag": "0001_glorious_retro_girl",
+      "breakpoints": true
     }
   ]
 }

@@ -3,81 +3,23 @@ import { notFound, redirect } from "next/navigation";
 import { and, eq } from "drizzle-orm";
 import { auth } from "@/auth";
 import { db } from "@/db/client";
-import { connectedLeagues, platformIdentities } from "@/db/schema";
-import { tryDecryptSecret } from "@/lib/crypto/secrets";
-import { EspnApiError } from "@/lib/espn/client";
-import { getCachedEspnTeamMatchup, getCachedSleeperTeamMatchup } from "@/lib/leagues/cache";
+import { connectedLeagues } from "@/db/schema";
 import { computeMatchupWinProb } from "@/lib/leagues/cross-league";
+import { getNflGameStatuses, type GameStatus } from "@/lib/leagues/nfl-schedule";
+import { getScoreOverrides } from "@/lib/leagues/score-overrides";
 import { getCurrentNflWeek } from "@/lib/leagues/week";
-import { SleeperApiError } from "@/lib/sleeper/client";
 import { AvatarImage } from "@/components/avatar-image";
+import { DemoScoreEditor } from "@/components/demo-score-editor";
 import { RemoveLeagueButton } from "@/components/remove-league-button";
-import type { LeagueMatchup, LeagueTeam, LeagueTeamPlayer } from "@/lib/leagues/types";
+import { loadMatchup } from "../../_load-matchup";
+import type { LeagueTeam, LeagueTeamPlayer } from "@/lib/leagues/types";
 
 const PLATFORM_LABEL: Record<string, string> = {
   sleeper: "Sleeper",
   espn: "ESPN",
   yahoo: "Yahoo",
+  demo: "Demo",
 };
-
-async function loadMatchup(
-  league: typeof connectedLeagues.$inferSelect,
-  userId: string,
-): Promise<{ matchup: LeagueMatchup | null; error: string | null }> {
-  try {
-    if (league.platform === "sleeper") {
-      const week = await getCurrentNflWeek();
-      return {
-        matchup: await getCachedSleeperTeamMatchup(
-          league.platformLeagueId,
-          league.userTeamId!,
-          week,
-        ),
-        error: null,
-      };
-    }
-
-    if (league.platform === "espn") {
-      let espnS2: string | undefined;
-      let swid: string | undefined;
-
-      if (league.platformUserId) {
-        const identity = await db.query.platformIdentities.findFirst({
-          where: and(
-            eq(platformIdentities.userId, userId),
-            eq(platformIdentities.platform, "espn"),
-            eq(platformIdentities.platformUserId, league.platformUserId),
-          ),
-        });
-        const decrypted = identity?.encryptedSecret
-          ? tryDecryptSecret(identity.encryptedSecret)
-          : null;
-        if (decrypted) {
-          espnS2 = decrypted;
-          swid = identity!.platformUserId;
-        }
-      }
-
-      return {
-        matchup: await getCachedEspnTeamMatchup(
-          Number(league.platformLeagueId),
-          Number(league.season),
-          league.userTeamId!,
-          espnS2,
-          swid,
-        ),
-        error: null,
-      };
-    }
-
-    return { matchup: null, error: "Yahoo leagues aren't supported yet." };
-  } catch (err) {
-    if (err instanceof SleeperApiError || err instanceof EspnApiError) {
-      return { matchup: null, error: err.message };
-    }
-    throw err;
-  }
-}
 
 function record(team: { wins: number; losses: number; ties: number }): string {
   return `${team.wins}-${team.losses}${team.ties ? `-${team.ties}` : ""}`;
@@ -175,6 +117,27 @@ function slotShade(slot: string | null): string {
   return POSITION_SHADE[slotLabel(slot)] ?? "";
 }
 
+// Team defenses ("DEF"/"D/ST"/"DST" across platforms) are the one roster
+// slot that isn't a person — abbreviating "New York Jets" to "N. Jets" reads
+// worse than just "Jets", so they get last-word-only instead of "F. Last".
+// Individual defensive players (IDP leagues) and kickers/punters are real
+// people and get the normal treatment.
+function isTeamDefense(position: string | null): boolean {
+  const p = (position ?? "").toUpperCase().trim();
+  return p === "DEF" || p === "D/ST" || p === "DST";
+}
+
+function abbreviatedName(player: LeagueTeamPlayer): string {
+  const name = player.name.trim();
+  const words = name.split(/\s+/);
+
+  if (isTeamDefense(player.position)) {
+    return words[words.length - 1] || name;
+  }
+  if (words.length < 2) return name;
+  return `${words[0].charAt(0)}. ${words.slice(1).join(" ")}`;
+}
+
 function PlayerName({
   player,
   align,
@@ -191,7 +154,7 @@ function PlayerName({
   }
   return (
     <div className={`min-w-0 ${align === "right" ? "text-right" : ""}`}>
-      <p className="truncate text-sm font-medium">{player.name}</p>
+      <p className="truncate text-sm font-medium">{abbreviatedName(player)}</p>
       {player.proTeam && (
         <p className="truncate text-[11px] text-muted-foreground">{player.proTeam}</p>
       )}
@@ -260,9 +223,15 @@ export default async function LeagueDetailPage({
   if (!league) notFound();
   if (!league.userTeamId) redirect(`/dashboard/leagues/${id}/select-team`);
 
-  const { matchup, error } = await loadMatchup(league, userId);
+  const week = await getCurrentNflWeek();
+  const scoreOverrides = await getScoreOverrides(userId);
+  const { matchup, error } = await loadMatchup(league, userId, week, scoreOverrides);
 
-  const winProb = matchup ? computeMatchupWinProb(matchup) : null;
+  const statusByTeam =
+    matchup && league.platform !== "demo"
+      ? await getNflGameStatuses(Number(league.season), matchup.week)
+      : new Map<string, GameStatus>();
+  const winProb = matchup ? computeMatchupWinProb(matchup, statusByTeam) : null;
   const winPct = winProb ? Math.round(winProb.winProbability * 100) : 0;
   const winBarColor =
     winPct >= 60 ? "bg-emerald-500" : winPct <= 40 ? "bg-red-500" : "bg-amber-400";
@@ -295,12 +264,14 @@ export default async function LeagueDetailPage({
             </p>
           </div>
           <div className="flex shrink-0 items-center gap-2">
-            <Link
-              href={`/dashboard/leagues/${id}/select-team`}
-              className="rounded-md border border-border px-3 py-1.5 text-xs font-medium hover:bg-muted"
-            >
-              Switch team
-            </Link>
+            {league.platform !== "demo" && (
+              <Link
+                href={`/dashboard/leagues/${id}/select-team`}
+                className="rounded-md border border-border px-3 py-1.5 text-xs font-medium hover:bg-muted"
+              >
+                Switch team
+              </Link>
+            )}
             <RemoveLeagueButton leagueRowId={id} leagueName={league.leagueName} />
           </div>
         </div>
@@ -312,15 +283,16 @@ export default async function LeagueDetailPage({
         </div>
       )}
 
+      {league.platform === "demo" && matchup && (
+        <DemoScoreEditor leagueRowId={id} matchup={matchup} />
+      )}
+
       {matchup && (
         <>
           {/* Score panel — left/right split */}
           <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2 rounded-xl border border-border bg-card p-3 sm:gap-3 sm:p-4">
             {/* User team */}
             <div className="flex min-w-0 flex-col gap-1">
-              <p className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
-                Your team
-              </p>
               <div className="flex w-full items-center gap-2">
                 <TeamAvatar
                   name={matchup.team.name}
@@ -331,14 +303,10 @@ export default async function LeagueDetailPage({
               {matchup.teamScore != null && (
                 <p className="text-2xl font-bold tabular-nums sm:text-3xl">
                   {matchup.teamScore.toFixed(1)}
-                  {matchup.teamProjectedScore != null && (
-                    <span className="ml-1 text-xs font-normal text-muted-foreground">
-                      (proj {matchup.teamProjectedScore.toFixed(1)})
-                    </span>
-                  )}
                 </p>
               )}
               <p className="text-xs text-muted-foreground">
+                {matchup.teamProjectedScore != null && `proj ${matchup.teamProjectedScore.toFixed(1)} · `}
                 {record(matchup.team)}
               </p>
             </div>
@@ -350,9 +318,6 @@ export default async function LeagueDetailPage({
             {/* Opponent */}
             {matchup.opponent ? (
               <div className="flex min-w-0 flex-col items-end gap-1 text-right">
-                <p className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
-                  Opponent
-                </p>
                 <div className="flex w-full items-center gap-2">
                   <p className="min-w-0 flex-1 truncate font-semibold">
                     {matchup.opponent.name}
@@ -365,22 +330,16 @@ export default async function LeagueDetailPage({
                 {matchup.opponentScore != null && (
                   <p className="text-2xl font-bold tabular-nums sm:text-3xl">
                     {matchup.opponentScore.toFixed(1)}
-                    {matchup.opponentProjectedScore != null && (
-                      <span className="ml-1 text-xs font-normal text-muted-foreground">
-                        (proj {matchup.opponentProjectedScore.toFixed(1)})
-                      </span>
-                    )}
                   </p>
                 )}
                 <p className="text-xs text-muted-foreground">
+                  {matchup.opponentProjectedScore != null &&
+                    `proj ${matchup.opponentProjectedScore.toFixed(1)} · `}
                   {record(matchup.opponent)}
                 </p>
               </div>
             ) : (
               <div className="flex min-w-0 flex-col items-end gap-1 text-right">
-                <p className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
-                  Opponent
-                </p>
                 <div className="flex w-full items-center gap-2">
                   <p className="min-w-0 flex-1 truncate font-semibold text-muted-foreground">
                     Bye week
