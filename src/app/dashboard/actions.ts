@@ -6,7 +6,7 @@ import { auth } from "@/auth";
 import { db } from "@/db/client";
 import { connectedLeagues, platformIdentities } from "@/db/schema";
 import { encryptSecret, tryDecryptSecret } from "@/lib/crypto/secrets";
-import { EspnApiError, getEspnLeagueInfo } from "@/lib/espn/client";
+import { EspnApiError, getEspnLeagueInfo, getEspnLeaguesForCookies } from "@/lib/espn/client";
 import { requireSessionUserId, STALE_SESSION_MESSAGE } from "@/lib/auth/require-user";
 import {
   getSleeperLeaguesForUser,
@@ -264,6 +264,147 @@ export async function connectEspnAccount(
 
   revalidatePath("/dashboard");
   return { error: null, success: `Imported "${league.name}".` };
+}
+
+export type EspnLookupState = {
+  error: string | null;
+  result: {
+    espnS2: string;
+    swid: string;
+    leagues: { leagueId: number; seasonId: number; name: string }[];
+  } | null;
+};
+
+/** Step 1: use just the ESPN cookies to discover every league on the account. */
+export async function lookupEspnLeagues(
+  _prevState: EspnLookupState,
+  formData: FormData,
+): Promise<EspnLookupState> {
+  const espnS2Raw = String(formData.get("espnS2") ?? "").trim();
+  const swidRaw = String(formData.get("swid") ?? "").trim();
+
+  const userId = await requireSessionUserId();
+  if (!userId) return { error: STALE_SESSION_MESSAGE, result: null };
+
+  let espnS2 = espnS2Raw || undefined;
+  let swid = swidRaw || undefined;
+  if (!espnS2 || !swid) {
+    const stored = await db.query.platformIdentities.findFirst({
+      where: and(eq(platformIdentities.userId, userId), eq(platformIdentities.platform, "espn")),
+    });
+    const decrypted = stored?.encryptedSecret ? tryDecryptSecret(stored.encryptedSecret) : null;
+    if (decrypted) {
+      espnS2 = decrypted;
+      swid = stored!.platformUserId;
+    }
+  }
+
+  if (!espnS2 || !swid) {
+    return {
+      error: "Enter your espn_s2 and SWID cookies (or save a login first).",
+      result: null,
+    };
+  }
+
+  let discovered;
+  try {
+    discovered = await getEspnLeaguesForCookies({ espnS2, swid });
+  } catch (err) {
+    if (err instanceof EspnApiError) return { error: err.message, result: null };
+    throw err;
+  }
+
+  if (discovered.length === 0) {
+    return { error: "No ESPN fantasy football leagues found for that login.", result: null };
+  }
+
+  const leagues = discovered
+    .map(({ leagueId, seasonId, name }) => ({ leagueId, seasonId, name }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+
+  return { error: null, result: { espnS2, swid, leagues } };
+}
+
+export type ConnectEspnLeaguesState = {
+  error: string | null;
+  success: string | null;
+};
+
+/** Step 2: import just the leagues the user checked. */
+export async function connectEspnLeagues(
+  _prevState: ConnectEspnLeaguesState,
+  formData: FormData,
+): Promise<ConnectEspnLeaguesState> {
+  const espnS2 = String(formData.get("espnS2") ?? "").trim();
+  const swid = String(formData.get("swid") ?? "").trim();
+  const selectedKeys = new Set(formData.getAll("leagueKeys").map(String));
+
+  let allLeagues: { leagueId: number; seasonId: number; name: string }[] = [];
+  try {
+    allLeagues = JSON.parse(String(formData.get("leaguesJson") ?? "[]"));
+  } catch {
+    return { error: "Something went wrong — start over.", success: null };
+  }
+
+  const selected = allLeagues.filter((l) => selectedKeys.has(`${l.leagueId}:${l.seasonId}`));
+  if (selected.length === 0) {
+    return { error: "Select at least one league.", success: null };
+  }
+  if (!espnS2 || !swid) {
+    return { error: "Missing ESPN login — start over.", success: null };
+  }
+
+  const userId = await requireSessionUserId();
+  if (!userId) return { error: STALE_SESSION_MESSAGE, success: null };
+
+  await db
+    .insert(platformIdentities)
+    .values({
+      userId,
+      platform: "espn",
+      platformUserId: swid,
+      encryptedSecret: encryptSecret(espnS2),
+    })
+    .onConflictDoUpdate({
+      target: [
+        platformIdentities.userId,
+        platformIdentities.platform,
+        platformIdentities.platformUserId,
+      ],
+      set: { encryptedSecret: encryptSecret(espnS2) },
+    });
+
+  for (const league of selected) {
+    await db
+      .insert(connectedLeagues)
+      .values({
+        userId,
+        platform: "espn",
+        platformLeagueId: String(league.leagueId),
+        platformUserId: swid,
+        leagueName: league.name,
+        season: String(league.seasonId),
+        sport: "nfl",
+      })
+      .onConflictDoUpdate({
+        target: [
+          connectedLeagues.userId,
+          connectedLeagues.platform,
+          connectedLeagues.platformLeagueId,
+        ],
+        set: {
+          leagueName: league.name,
+          season: String(league.seasonId),
+          platformUserId: swid,
+        },
+      });
+  }
+
+  revalidatePath("/dashboard");
+  return {
+    error: null,
+    success: `Added ${selected.length} league${selected.length === 1 ? "" : "s"}.`,
+  };
 }
 
 export async function removeConnectedLeague(leagueRowId: string) {

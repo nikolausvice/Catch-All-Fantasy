@@ -191,6 +191,108 @@ export async function getEspnBoxscoresForWeek({
   }
 }
 
+export interface EspnDiscoveredLeague {
+  leagueId: number;
+  seasonId: number;
+  name: string;
+}
+
+/**
+ * ESPN's fan API returns every fantasy entry tied to the logged-in account's
+ * cookies, across seasons — no leagueId needed up front. This is an
+ * undocumented endpoint (reverse-engineered from ESPN's own fantasy site
+ * traffic), so we parse defensively and surface a clear error if ESPN ever
+ * changes the response shape.
+ *
+ * Fantasy entries are marked by `typeId: 9` ("Fantasy League Manager") at
+ * the preference level; `metaData.entry.abbrev` distinguishes the sport
+ * within that ("FFL" = football, as opposed to e.g. "FBB" for baseball).
+ * `metaData.entry.gameId` is a numeric internal id, NOT the "ffl" slug used
+ * elsewhere in ESPN's API — don't filter on it.
+ */
+export async function getEspnLeaguesForCookies({
+  espnS2,
+  swid,
+}: {
+  espnS2: string;
+  swid: string;
+}): Promise<EspnDiscoveredLeague[]> {
+  const normalizedSwid = swid.startsWith("{") ? swid : `{${swid.replace(/[{}]/g, "")}}`;
+  const url = `https://fan.api.espn.com/apis/v2/fans/${encodeURIComponent(
+    normalizedSwid,
+  )}?platform=fantasy&featureFlags=expandedLeagueGroupResponse&lang=en`;
+
+  const res = await fetch(url, {
+    headers: {
+      Cookie: `espn_s2=${espnS2}; SWID=${normalizedSwid};`,
+      Accept: "application/json",
+    },
+    cache: "no-store",
+  });
+
+  if (res.status === 401 || res.status === 403) {
+    throw new EspnApiError(
+      "ESPN rejected those credentials. Double-check the espn_s2 and SWID cookies.",
+      res.status,
+    );
+  }
+  if (!res.ok) {
+    throw new EspnApiError(
+      `ESPN returned an unexpected error while looking up leagues (HTTP ${res.status}).`,
+      res.status,
+    );
+  }
+
+  let data: unknown;
+  try {
+    data = await res.json();
+  } catch {
+    throw new EspnApiError("ESPN returned an unexpected response while looking up leagues.", 0);
+  }
+
+  const preferences = (data as { preferences?: unknown[] } | null)?.preferences;
+  if (!Array.isArray(preferences)) {
+    throw new EspnApiError("ESPN returned an unexpected response while looking up leagues.", 0);
+  }
+
+  // The account can have multiple teams in the same league (e.g. it owns
+  // several teams in a test league) and the same league can appear once per
+  // season played — keep only the most recent season per league so "find
+  // leagues" reflects the league the user is in *now*.
+  const byLeagueId = new Map<number, EspnDiscoveredLeague>();
+  for (const pref of preferences) {
+    const p = pref as {
+      typeId?: number;
+      metaData?: {
+        entry?: {
+          abbrev?: string;
+          seasonId?: number;
+          groups?: { groupId?: number; groupName?: string }[];
+        };
+      };
+    };
+    if (p.typeId !== 9) continue;
+    const entry = p.metaData?.entry;
+    if (!entry || entry.abbrev !== "FFL") continue;
+
+    const group = entry.groups?.[0];
+    const groupId = group?.groupId;
+    const seasonId = entry.seasonId;
+    if (!groupId || !seasonId) continue;
+
+    const existing = byLeagueId.get(groupId);
+    if (!existing || seasonId > existing.seasonId) {
+      byLeagueId.set(groupId, {
+        leagueId: groupId,
+        seasonId,
+        name: group?.groupName ?? `League ${groupId}`,
+      });
+    }
+  }
+
+  return [...byLeagueId.values()];
+}
+
 function buildClient({
   leagueId,
   espnS2,

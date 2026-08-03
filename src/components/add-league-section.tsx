@@ -23,12 +23,8 @@ export function AddLeagueSection({ hasStoredEspnCookies }: { hasStoredEspnCookie
   const [selected, setSelected] = useState<Platform | null>(null);
 
   return (
-    <details className="rounded-xl border border-border bg-card p-4">
-      <summary className="cursor-pointer select-none text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-        + Add another league
-      </summary>
-
-      <div className="mt-4">
+    <div>
+      <div>
         {selected === null ? (
           <div className="flex flex-col gap-3">
             <p className="text-sm text-muted-foreground">
@@ -90,6 +86,6 @@ export function AddLeagueSection({ hasStoredEspnCookies }: { hasStoredEspnCookie
           </div>
         )}
       </div>
-    </details>
+    </div>
   );
 }

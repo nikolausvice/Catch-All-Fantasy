@@ -1,10 +1,9 @@
 import Link from "next/link";
 import { Fragment } from "react";
-import { and, desc, eq } from "drizzle-orm";
+import { desc, eq } from "drizzle-orm";
 import { auth } from "@/auth";
 import { db } from "@/db/client";
-import { connectedLeagues, platformIdentities } from "@/db/schema";
-import { AddLeagueSection } from "@/components/add-league-section";
+import { connectedLeagues } from "@/db/schema";
 import { AvatarImage } from "@/components/avatar-image";
 import { IntelTabs } from "@/components/intel-tabs";
 import { StillPlayingSection } from "@/components/still-playing-section";
@@ -379,11 +378,6 @@ export default async function DashboardPage() {
   const sweepPct = Math.round(analysis.probAllWins * 100);
   const failedLeagues = matchups.filter((m) => m.error);
 
-  const espnIdentity = await db.query.platformIdentities.findFirst({
-    where: and(eq(platformIdentities.userId, userId), eq(platformIdentities.platform, "espn")),
-    columns: { id: true },
-  });
-
   return (
     <div className="flex flex-col gap-6">
       <div>
@@ -392,8 +386,6 @@ export default async function DashboardPage() {
           Every league you&apos;re playing in, compared side by side.
         </p>
       </div>
-
-      <AddLeagueSection hasStoredEspnCookies={!!espnIdentity} />
 
       {failedLeagues.length > 0 && (
         <div className="rounded-xl border border-destructive/30 bg-destructive/10 p-4 text-sm text-destructive">

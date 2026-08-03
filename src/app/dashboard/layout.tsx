@@ -1,9 +1,14 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import { eq, and } from "drizzle-orm";
 import { auth } from "@/auth";
+import { db } from "@/db/client";
+import { platformIdentities } from "@/db/schema";
+import { AddLeagueButton } from "@/components/add-league-button";
 import { RefreshButton } from "@/components/refresh-button";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { requireSessionUserId } from "@/lib/auth/require-user";
+import { headerButtonClass } from "@/lib/utils";
 import { signOut } from "../(auth)/actions";
 
 export default async function DashboardLayout({
@@ -25,6 +30,11 @@ export default async function DashboardLayout({
 
   const user = session.user;
 
+  const espnIdentity = await db.query.platformIdentities.findFirst({
+    where: and(eq(platformIdentities.userId, userId), eq(platformIdentities.platform, "espn")),
+    columns: { id: true },
+  });
+
   return (
     <div className="flex min-h-screen flex-col">
       <header className="sticky top-0 z-10 border-b border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80">
@@ -36,13 +46,11 @@ export default async function DashboardLayout({
             <span className="hidden text-sm text-muted-foreground sm:inline">
               {user.email}
             </span>
+            <AddLeagueButton hasStoredEspnCookies={!!espnIdentity} />
             <RefreshButton />
             <ThemeToggle />
             <form action={signOut}>
-              <button
-                type="submit"
-                className="rounded-md border border-border px-3 py-2 text-sm hover:bg-muted"
-              >
+              <button type="submit" className={headerButtonClass}>
                 Log out
               </button>
             </form>
