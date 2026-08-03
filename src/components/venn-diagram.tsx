@@ -1,7 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import { Check } from "lucide-react";
 
 export interface VennSetInfo {
   leagueId: string;
@@ -50,6 +49,7 @@ export function VennExplorer({ sets, combos }: { sets: VennSetInfo[]; combos: Ve
   const [selected, setSelected] = useState<string[]>([]);
 
   const sideById = new Map(sets.map((s) => [s.leagueId, s.side]));
+  const labelById = new Map(sets.map((s) => [s.leagueId, s.label]));
   const overlapCombos = combos.filter((c) => c.leagueIds.length >= 2);
 
   if (overlapCombos.length === 0) {
@@ -125,7 +125,7 @@ export function VennExplorer({ sets, combos }: { sets: VennSetInfo[]; combos: Ve
               disabled={!hasOverlap}
               onClick={() => toggle(s.leagueId)}
               title={!hasOverlap ? `${s.label} — no overlap with any other team` : s.label}
-              className={`relative flex min-h-11 items-center justify-center rounded-lg border-2 px-2 py-1.5 text-center text-xs font-semibold leading-tight transition-all ${
+              className={`flex min-h-11 items-center justify-center rounded-lg border-2 px-2 py-1.5 text-center text-xs font-semibold leading-tight outline-none transition-all focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 ${
                 !hasOverlap
                   ? "cursor-not-allowed opacity-40"
                   : isSelected
@@ -144,14 +144,6 @@ export function VennExplorer({ sets, combos }: { sets: VennSetInfo[]; combos: Ve
               }}
             >
               {s.label}
-              {isSelected && (
-                <span
-                  className="absolute -right-1.5 -top-1.5 flex size-4 items-center justify-center rounded-full border-2 border-background"
-                  style={{ backgroundColor: color }}
-                >
-                  <Check className="size-2.5 text-white" strokeWidth={3} />
-                </span>
-              )}
             </button>
           );
         })}
@@ -166,24 +158,44 @@ export function VennExplorer({ sets, combos }: { sets: VennSetInfo[]; combos: Ve
               key={p.id}
               type="button"
               onClick={() => setSelected(p.leagueIds)}
-              className="flex items-center justify-between gap-3 rounded-xl border p-3 text-left transition-colors hover:bg-muted/50"
-              style={{ borderColor: `${color}55`, backgroundColor: `${color}14` }}
+              className="flex flex-col gap-2 rounded-xl border-2 p-3 text-left outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+              style={{ borderColor: color, backgroundColor: `${color}26` }}
             >
-              <div className="min-w-0">
-                <p className="truncate text-sm font-medium">{p.name}</p>
-                <p className="text-xs text-muted-foreground">
-                  {p.proTeam}
-                  {p.projectedPoints > 0 && ` · ${p.projectedPoints.toFixed(1)} proj`}
-                </p>
+              <div className="flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-medium">{p.name}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {p.proTeam}
+                    {p.projectedPoints > 0 && ` · ${p.projectedPoints.toFixed(1)} proj`}
+                  </p>
+                </div>
+                <span
+                  className={`shrink-0 text-sm font-bold tabular-nums ${
+                    isFiltered ? "text-muted-foreground" : SIDE_TEXT_CLASS[p.side]
+                  }`}
+                >
+                  {p.netValue > 0 ? "+" : ""}
+                  {p.netValue.toFixed(1)}
+                </span>
               </div>
-              <span
-                className={`shrink-0 text-sm font-bold tabular-nums ${
-                  isFiltered ? "text-muted-foreground" : SIDE_TEXT_CLASS[p.side]
-                }`}
-              >
-                {p.netValue > 0 ? "+" : ""}
-                {p.netValue.toFixed(1)}
-              </span>
+              <div className="flex flex-wrap gap-1.5">
+                {p.leagueIds.map((leagueId) => {
+                  const isOwn = sideById.get(leagueId) === "own";
+                  const label = labelById.get(leagueId) ?? leagueId;
+                  return (
+                    <span
+                      key={leagueId}
+                      className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold ${
+                        isOwn
+                          ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"
+                          : "bg-red-500/15 text-red-600 dark:text-red-400"
+                      }`}
+                    >
+                      {isOwn ? "↑" : "↓"} {label}
+                    </span>
+                  );
+                })}
+              </div>
             </button>
           );
         })}
