@@ -17,21 +17,15 @@ export interface VennComboInfo {
     name: string;
     position: string | null;
     proTeam: string | null;
-    /** Plain informational projection (the higher of the contexts this player appears in) — not signed. */
-    projectedPoints: number;
     /** Own-side contexts add, opponent-side subtract — a player on two opposing rosters compounds. */
     netValue: number;
+    /** This player's signed projected contribution in each individual league they're rostered
+     * in (own-side positive, opponent-side negative) — what each league chip shows. */
+    leagueValues: Record<string, number>;
   }[];
 }
 
 type Side = "own" | "opponent" | "mix";
-
-const SIDE_COLOR: Record<Side, string> = {
-  own: "#22c55e", // green-500
-  opponent: "#ef4444", // red-500
-  mix: "#f59e0b", // amber-500
-};
-const GREY_COLOR = "#9ca3af"; // gray-400 — no overlap, or filtered out of the current selection
 
 const SIDE_TEXT_CLASS: Record<Side, string> = {
   own: "text-emerald-600 dark:text-emerald-400",
@@ -43,6 +37,18 @@ function comboSide(sideById: Map<string, "own" | "opponent">, leagueIds: string[
   const sides = new Set(leagueIds.map((id) => sideById.get(id)));
   if (sides.has("own") && sides.has("opponent")) return "mix";
   return sides.has("own") ? "own" : "opponent";
+}
+
+/** One style for every league chip — the "Filtering by" pills above the list and each
+ * player's own league chips below it — so selecting a filter and seeing it reflected on a
+ * card read as the same visual language. Selected state is a border outline rather than a
+ * solid fill, so it stays legible without turning the whole list into a wall of bright color. */
+function chipClassName(isOwn: boolean, isSelected: boolean): string {
+  const tint = isOwn
+    ? "bg-emerald-500/15 text-emerald-600 hover:bg-emerald-500/25 dark:text-emerald-400"
+    : "bg-red-500/15 text-red-600 hover:bg-red-500/25 dark:text-red-400";
+  const border = isSelected ? (isOwn ? "border-emerald-500" : "border-red-500") : "border-transparent";
+  return `border-2 ${border} ${tint}`;
 }
 
 export function VennExplorer({
@@ -141,14 +147,13 @@ export function VennExplorer({
         <div className="flex flex-wrap items-center gap-2 text-sm">
           <span className="text-muted-foreground">Filtering by:</span>
           {selected.map((leagueId) => {
-            const color = SIDE_COLOR[sideById.get(leagueId) ?? "own"];
+            const isOwn = sideById.get(leagueId) === "own";
             return (
               <button
                 key={leagueId}
                 type="button"
                 onClick={() => toggle(leagueId)}
-                className="inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-semibold text-white transition-opacity hover:opacity-90"
-                style={{ backgroundColor: color }}
+                className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-semibold transition-colors ${chipClassName(isOwn, true)}`}
               >
                 {labelById.get(leagueId) ?? leagueId} ✕
               </button>
@@ -172,23 +177,18 @@ export function VennExplorer({
       <div className="flex flex-col gap-2">
         {visible.map((p) => {
           const isFiltered = selected.length > 0 && !matchingPlayerIds.has(p.id);
-          const color = isFiltered ? GREY_COLOR : SIDE_COLOR[p.side];
           return (
             <div
               key={p.id}
-              className="flex flex-col gap-3 rounded-xl border-[3px] bg-card p-4"
-              style={{ borderColor: color }}
+              className="flex flex-col gap-3 rounded-xl border border-border bg-card p-4"
             >
               <div className="flex items-center justify-between gap-3">
                 <div className="min-w-0">
                   <p className="truncate text-sm font-medium">{p.name}</p>
-                  <p className="text-xs text-muted-foreground">
-                    {p.proTeam}
-                    {p.projectedPoints > 0 && ` · ${p.projectedPoints.toFixed(1)} proj`}
-                  </p>
+                  <p className="text-xs text-muted-foreground">{p.proTeam}</p>
                 </div>
                 <span
-                  className={`shrink-0 text-sm font-bold tabular-nums ${
+                  className={`shrink-0 text-2xl font-bold tabular-nums ${
                     isFiltered ? "text-muted-foreground" : SIDE_TEXT_CLASS[p.side]
                   }`}
                 >
@@ -200,24 +200,27 @@ export function VennExplorer({
                 {p.leagueIds.map((leagueId) => {
                   const isOwn = sideById.get(leagueId) === "own";
                   const label = labelById.get(leagueId) ?? leagueId;
-                  const isSelected = selected.includes(leagueId);
+                  // Only show a chip as "selected" on cards that actually satisfy every active
+                  // filter together — a player who's only on Team A shouldn't have their Team A
+                  // chip light up just because Team A is one of the filters, when Team B is too
+                  // and this player isn't on Team B's roster.
+                  const isSelected = selected.includes(leagueId) && !isFiltered;
+                  const value = p.leagueValues[leagueId] ?? 0;
                   return (
                     <button
                       key={leagueId}
                       type="button"
                       onClick={() => toggle(leagueId)}
                       title={`Filter by ${label}`}
-                      className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 ${
-                        isSelected
-                          ? isOwn
-                            ? "bg-emerald-500 text-white"
-                            : "bg-red-500 text-white"
-                          : isOwn
-                            ? "bg-emerald-500/15 text-emerald-600 hover:bg-emerald-500/25 dark:text-emerald-400"
-                            : "bg-red-500/15 text-red-600 hover:bg-red-500/25 dark:text-red-400"
-                      }`}
+                      className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[11px] font-semibold outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 ${chipClassName(isOwn, isSelected)}`}
                     >
-                      {isOwn ? "↑" : "↓"} {label}
+                      <span>
+                        {isOwn ? "↑" : "↓"} {label}
+                      </span>
+                      <span className="tabular-nums opacity-80">
+                        {value > 0 ? "+" : ""}
+                        {value.toFixed(1)}
+                      </span>
                     </button>
                   );
                 })}

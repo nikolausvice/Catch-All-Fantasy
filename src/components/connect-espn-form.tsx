@@ -8,21 +8,32 @@ import {
   lookupEspnLeagues,
   type EspnLookupState,
 } from "@/app/dashboard/actions";
+import { EspnLiveLogin } from "@/components/espn-live-login";
 
 type EspnLoginResult =
   | { status: "success"; espnS2: string; swid: string }
-  | { status: "error"; message: string };
+  | { status: "otp_required"; sessionId: string }
+  | { status: "error"; message: string; reason?: "otp" | "captcha" | "invalid_credentials" };
 
 /** Signs into ESPN in the background — a real Chromium process our own server launches
  * directly (no third-party browser-hosting vendor involved), submits the credentials to
- * ESPN's real login form, and returns the resulting cookies. Runs entirely within one
- * request, so if ESPN throws an MFA code or CAPTCHA there's no way to relay it — that
- * attempt just fails with a message pointing at manual cookie paste below. */
-function EspnBackgroundLogin({ onCookies }: { onCookies: (espnS2: string, swid: string) => void }) {
+ * ESPN's real login form, and returns the resulting cookies. If ESPN asks for a verification
+ * code, the browser is held open server-side and this shows a code field so the user can enter
+ * it themselves — same as typing it into ESPN's own page, not a bypass. Only a CAPTCHA still
+ * hands off to the live sign-in view, since there's no code to relay for that. */
+function EspnBackgroundLogin({
+  onCookies,
+  onNeedsLiveLogin,
+}: {
+  onCookies: (espnS2: string, swid: string) => void;
+  onNeedsLiveLogin: () => void;
+}) {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [otpSessionId, setOtpSessionId] = useState<string | null>(null);
+  const [code, setCode] = useState("");
 
   async function submit() {
     setPending(true);
@@ -38,12 +49,130 @@ function EspnBackgroundLogin({ onCookies }: { onCookies: (espnS2: string, swid: 
         onCookies(data.espnS2, data.swid);
         return;
       }
+      if (data.status === "otp_required") {
+        setOtpSessionId(data.sessionId);
+        return;
+      }
+      if (data.reason === "captcha") {
+        onNeedsLiveLogin();
+        return;
+      }
       setError(data.message);
     } catch {
       setError("Couldn't start ESPN sign-in. Try again or paste cookies manually.");
     } finally {
       setPending(false);
     }
+  }
+
+  async function submitCode() {
+    if (!otpSessionId) return;
+    setPending(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/espn-login/otp", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sessionId: otpSessionId, code }),
+      });
+      const data: EspnLoginResult = await res.json();
+      if (data.status === "success") {
+        onCookies(data.espnS2, data.swid);
+        return;
+      }
+      // The session is spent either way (submitEspnOtp always closes its browser) —
+      // clear it so a retry restarts the sign-in rather than resubmitting a dead session.
+      setOtpSessionId(null);
+      setCode("");
+      if (data.status === "otp_required") {
+        setError("Something went wrong — try signing in again.");
+        return;
+      }
+      if (data.reason === "captcha") {
+        onNeedsLiveLogin();
+        return;
+      }
+      setError(data.message);
+    } catch {
+      setError("Couldn't submit the verification code. Try again or paste cookies manually.");
+      setOtpSessionId(null);
+      setCode("");
+    } finally {
+      setPending(false);
+    }
+  }
+
+  // This form's inputs sit inside the parent <form> that submits ESPN cookie lookups (so
+  // "Enter" while typing them would otherwise trigger THAT form's action with no cookies set,
+  // instead of actually signing in) — intercept Enter here and drive our own submit instead.
+  function handleCredentialsKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (e.key !== "Enter") return;
+    e.preventDefault();
+    if (!pending && username && password) submit();
+  }
+
+  function handleCodeKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (e.key !== "Enter") return;
+    e.preventDefault();
+    if (!pending && code) submitCode();
+  }
+
+  function cancelOtp() {
+    const sessionId = otpSessionId;
+    setOtpSessionId(null);
+    setCode("");
+    setError(null);
+    if (sessionId) {
+      fetch("/api/espn-login", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sessionId }),
+      }).catch(() => {});
+    }
+  }
+
+  if (otpSessionId) {
+    return (
+      <div className="flex flex-col gap-3 rounded-lg border border-border p-3">
+        <div className="flex flex-col gap-1.5">
+          <label htmlFor="espn-otp-code" className="text-sm font-medium">
+            Verification code
+          </label>
+          <p className="text-xs text-muted-foreground">
+            ESPN sent a code to verify it&apos;s you. Enter it below to finish signing in.
+          </p>
+          <input
+            id="espn-otp-code"
+            type="text"
+            inputMode="numeric"
+            autoComplete="one-time-code"
+            autoFocus
+            value={code}
+            onChange={(e) => setCode(e.target.value)}
+            onKeyDown={handleCodeKeyDown}
+            className="rounded-md border border-border bg-background px-3 py-2 text-sm outline-none ring-ring focus:ring-2"
+          />
+        </div>
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            disabled={pending || !code}
+            onClick={submitCode}
+            className="inline-flex min-h-[44px] flex-1 items-center justify-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-60 sm:flex-none"
+          >
+            {pending ? "Verifying…" : "Verify"}
+          </button>
+          <button
+            type="button"
+            onClick={cancelOtp}
+            className="text-sm text-muted-foreground hover:text-foreground"
+          >
+            Cancel
+          </button>
+        </div>
+        {error && <p className="text-sm text-destructive">{error}</p>}
+      </div>
+    );
   }
 
   return (
@@ -59,6 +188,7 @@ function EspnBackgroundLogin({ onCookies }: { onCookies: (espnS2: string, swid: 
             autoComplete="username"
             value={username}
             onChange={(e) => setUsername(e.target.value)}
+            onKeyDown={handleCredentialsKeyDown}
             className="rounded-md border border-border bg-background px-3 py-2 text-sm outline-none ring-ring focus:ring-2"
           />
         </div>
@@ -72,6 +202,7 @@ function EspnBackgroundLogin({ onCookies }: { onCookies: (espnS2: string, swid: 
             autoComplete="current-password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
+            onKeyDown={handleCredentialsKeyDown}
             className="rounded-md border border-border bg-background px-3 py-2 text-sm outline-none ring-ring focus:ring-2"
           />
         </div>
@@ -125,12 +256,47 @@ function SavedEspnLoginBanner({
   onUseDifferent: () => void;
 }) {
   const [pending, startTransition] = useTransition();
+  const [affectedLeagues, setAffectedLeagues] = useState<string[] | null>(null);
 
-  function forget() {
-    onUseDifferent();
+  function forget(force: boolean) {
     startTransition(async () => {
-      await disconnectEspnAccount();
+      const result = await disconnectEspnAccount(force);
+      if (result.affectedLeagueNames?.length) {
+        setAffectedLeagues(result.affectedLeagueNames);
+        return;
+      }
+      setAffectedLeagues(null);
+      onUseDifferent();
     });
+  }
+
+  if (affectedLeagues) {
+    return (
+      <div className="flex flex-col gap-3 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2.5">
+        <p className="text-sm text-destructive">
+          Forgetting this login will stop syncing for{" "}
+          {affectedLeagues.length === 1 ? "this private league" : `these ${affectedLeagues.length} private leagues`}{" "}
+          until you reconnect: {affectedLeagues.join(", ")}.
+        </p>
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            disabled={pending}
+            onClick={() => forget(true)}
+            className="text-xs font-medium text-destructive underline-offset-2 hover:underline disabled:opacity-60"
+          >
+            {pending ? "Removing…" : "Forget anyway"}
+          </button>
+          <button
+            type="button"
+            onClick={() => setAffectedLeagues(null)}
+            className="text-xs font-medium text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+          >
+            Cancel
+          </button>
+        </div>
+      </div>
+    );
   }
 
   return (
@@ -152,7 +318,7 @@ function SavedEspnLoginBanner({
         <button
           type="button"
           disabled={pending}
-          onClick={forget}
+          onClick={() => forget(false)}
           className="text-xs font-medium text-destructive underline-offset-2 hover:underline disabled:opacity-60"
         >
           {pending ? "Removing…" : "Forget"}
@@ -323,6 +489,7 @@ function EspnLookupFlow({
   const [swid, setSwid] = useState("");
   const [showCookieFields, setShowCookieFields] = useState(!hasStoredCookies);
   const [restarted, setRestarted] = useState(false);
+  const [liveLogin, setLiveLogin] = useState(false);
 
   const result = lookupState.result;
 
@@ -377,9 +544,11 @@ function EspnLookupFlow({
               {lookupPending ? "Looking up…" : "Find leagues"}
             </button>
           </>
+        ) : liveLogin ? (
+          <EspnLiveLogin onCookies={handleCookies} onCancel={() => setLiveLogin(false)} />
         ) : (
           <div className="flex flex-col gap-3">
-            <EspnBackgroundLogin onCookies={handleCookies} />
+            <EspnBackgroundLogin onCookies={handleCookies} onNeedsLiveLogin={() => setLiveLogin(true)} />
 
             <details className="text-sm">
               <summary className="cursor-pointer select-none text-muted-foreground hover:text-foreground">

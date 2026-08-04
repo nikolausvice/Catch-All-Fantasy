@@ -74,5 +74,5 @@ export async function signUp(
 }
 
 export async function signOut() {
-  await authSignOut({ redirectTo: "/login" });
+  await authSignOut({ redirectTo: "/" });
 }

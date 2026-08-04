@@ -92,6 +92,13 @@ export interface RemainingPlayerAnalysis {
      * hits their projection exactly.
      */
     isExact: boolean;
+    /**
+     * How many OTHER starters (either side) are still to play in this league besides this
+     * player — 0 exactly when isExact is true. Continuous rather than a boolean so a visual
+     * can sharpen gradually as the week's games finish, instead of jumping straight from
+     * "estimate" to "final" the instant the very last one kicks off.
+     */
+    remainingOthers: number;
   }[];
   /**
    * True when the player is your starter in some leagues but opponent's
@@ -638,6 +645,7 @@ export function analyzeCrossLeague(
         winningWithout,
         description: desc,
         isExact: remainingCountByLeague.get(leagueId) === 1,
+        remainingOthers: (remainingCountByLeague.get(leagueId) ?? 1) - 1,
       });
     }
 
@@ -689,6 +697,7 @@ export function analyzeCrossLeague(
           winningWithout,
           description: desc,
           isExact: remainingCountByLeague.get(leagueId) === 1,
+          remainingOthers: (remainingCountByLeague.get(leagueId) ?? 1) - 1,
         });
       }
     }

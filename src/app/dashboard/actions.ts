@@ -266,17 +266,83 @@ export async function connectEspnAccount(
   return { error: null, success: `Imported "${league.name}".` };
 }
 
-/** Forgets the saved ESPN login (espn_s2/SWID). Already-connected leagues stay connected — this only
- * removes the credential used to look up new ones / refresh private-league data going forward. */
-export async function disconnectEspnAccount(): Promise<{ error: string | null }> {
+export type DisconnectEspnResult = {
+  error: string | null;
+  /** Set when forgetting would break refreshes for private leagues still using this login —
+   * the caller should show these names and let the user confirm before retrying with force. */
+  affectedLeagueNames?: string[];
+};
+
+/** Forgets the saved ESPN login (espn_s2/SWID). The `connectedLeagues` rows for any leagues
+ * added with it stay in place, but private leagues need this same credential to refresh their
+ * data going forward — so unless `force` is set, this stops short of deleting and reports which
+ * leagues would break instead. */
+export async function disconnectEspnAccount(force = false): Promise<DisconnectEspnResult> {
   const userId = await requireSessionUserId();
   if (!userId) return { error: STALE_SESSION_MESSAGE };
+
+  if (!force) {
+    const identities = await db.query.platformIdentities.findMany({
+      where: and(eq(platformIdentities.userId, userId), eq(platformIdentities.platform, "espn")),
+    });
+    const savedSwids = new Set(identities.map((i) => i.platformUserId));
+
+    if (savedSwids.size > 0) {
+      const leagues = await db.query.connectedLeagues.findMany({
+        where: and(eq(connectedLeagues.userId, userId), eq(connectedLeagues.platform, "espn")),
+      });
+      const affectedLeagueNames = leagues
+        .filter((l) => l.platformUserId && savedSwids.has(l.platformUserId))
+        .map((l) => l.leagueName);
+      if (affectedLeagueNames.length > 0) {
+        return { error: null, affectedLeagueNames };
+      }
+    }
+  }
 
   await db
     .delete(platformIdentities)
     .where(and(eq(platformIdentities.userId, userId), eq(platformIdentities.platform, "espn")));
 
   revalidatePath("/dashboard");
+  return { error: null };
+}
+
+/** Same idea as disconnectEspnAccount, but scoped to one saved login (identified by its row
+ * id) rather than every ESPN identity the user has — for the settings page, where a user with
+ * more than one ESPN account/cookie set can forget one without touching the others. */
+export async function disconnectEspnIdentity(
+  identityId: string,
+  force = false,
+): Promise<DisconnectEspnResult> {
+  const userId = await requireSessionUserId();
+  if (!userId) return { error: STALE_SESSION_MESSAGE };
+
+  const identity = await db.query.platformIdentities.findFirst({
+    where: and(
+      eq(platformIdentities.id, identityId),
+      eq(platformIdentities.userId, userId),
+      eq(platformIdentities.platform, "espn"),
+    ),
+  });
+  if (!identity) return { error: null };
+
+  if (!force) {
+    const leagues = await db.query.connectedLeagues.findMany({
+      where: and(eq(connectedLeagues.userId, userId), eq(connectedLeagues.platform, "espn")),
+    });
+    const affectedLeagueNames = leagues
+      .filter((l) => l.platformUserId === identity.platformUserId)
+      .map((l) => l.leagueName);
+    if (affectedLeagueNames.length > 0) {
+      return { error: null, affectedLeagueNames };
+    }
+  }
+
+  await db.delete(platformIdentities).where(eq(platformIdentities.id, identityId));
+
+  revalidatePath("/dashboard");
+  revalidatePath("/dashboard/settings");
   return { error: null };
 }
 
@@ -434,4 +500,5 @@ export async function removeConnectedLeague(leagueRowId: string) {
       ),
     );
   revalidatePath("/dashboard");
+  revalidatePath("/dashboard/settings");
 }

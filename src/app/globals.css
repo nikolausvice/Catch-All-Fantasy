@@ -69,3 +69,16 @@ body {
   color: var(--foreground);
   padding-bottom: env(safe-area-inset-bottom);
 }
+
+/* Chrome/Safari paint autofilled inputs with their own opaque (usually white) background,
+   ignoring the page's — the long transition delay is the standard trick to stop that paint
+   from ever showing before we override it with an inset box-shadow of our own card color. */
+input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:focus {
+  -webkit-text-fill-color: var(--foreground);
+  -webkit-box-shadow: 0 0 0px 1000px var(--card) inset;
+  box-shadow: 0 0 0px 1000px var(--card) inset;
+  caret-color: var(--foreground);
+  transition: background-color 5000s ease-in-out 0s;
+}

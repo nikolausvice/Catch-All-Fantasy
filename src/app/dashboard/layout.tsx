@@ -6,10 +6,9 @@ import { db } from "@/db/client";
 import { platformIdentities } from "@/db/schema";
 import { AddLeagueButton } from "@/components/add-league-button";
 import { RefreshButton } from "@/components/refresh-button";
-import { ThemeToggle } from "@/components/theme-toggle";
+import { SiteFooter } from "@/components/site-footer";
+import { UserMenu } from "@/components/user-menu";
 import { requireSessionUserId } from "@/lib/auth/require-user";
-import { headerButtonClass } from "@/lib/utils";
-import { signOut } from "../(auth)/actions";
 
 export default async function DashboardLayout({
   children,
@@ -28,8 +27,6 @@ export default async function DashboardLayout({
   const userId = await requireSessionUserId();
   if (!userId) redirect("/clear-session");
 
-  const user = session.user;
-
   const espnIdentity = await db.query.platformIdentities.findFirst({
     where: and(eq(platformIdentities.userId, userId), eq(platformIdentities.platform, "espn")),
     columns: { id: true },
@@ -38,28 +35,21 @@ export default async function DashboardLayout({
   return (
     <div className="flex min-h-screen flex-col">
       <header className="sticky top-0 z-10 border-b border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80">
-        <div className="mx-auto flex max-w-5xl flex-col gap-2 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:py-4">
+        <div className="mx-auto flex max-w-5xl flex-col items-center gap-2 px-4 py-3 sm:flex-row sm:justify-between sm:py-4">
           <Link href="/dashboard" className="font-semibold tracking-tight">
             Catch All Fantasy
           </Link>
-          <div className="flex flex-wrap items-center gap-2 sm:gap-3">
-            <span className="hidden text-sm text-muted-foreground sm:inline">
-              {user.email}
-            </span>
+          <div className="flex flex-wrap items-center justify-center gap-2 sm:justify-start sm:gap-3">
             <AddLeagueButton hasStoredEspnCookies={!!espnIdentity} />
             <RefreshButton />
-            <ThemeToggle />
-            <form action={signOut}>
-              <button type="submit" className={headerButtonClass}>
-                Log out
-              </button>
-            </form>
+            <UserMenu />
           </div>
         </div>
       </header>
       <main className="mx-auto w-full max-w-5xl flex-1 px-4 py-6 sm:py-8">
         {children}
       </main>
+      <SiteFooter />
     </div>
   );
 }

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireSessionUserId } from "@/lib/auth/require-user";
-import { attemptEspnLogin } from "@/lib/espn-login/client";
+import { attemptEspnLogin, cancelEspnOtpSession } from "@/lib/espn-login/client";
 
 // A real Chromium launch + navigate + login round trip can take longer than
 // the default function timeout — extend it (only takes effect on Vercel;
@@ -28,4 +28,14 @@ export async function POST(req: Request) {
       { status: 502 },
     );
   }
+}
+
+export async function DELETE(req: Request) {
+  const userId = await requireSessionUserId();
+  if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  const body = await req.json().catch(() => null);
+  const sessionId = typeof body?.sessionId === "string" ? body.sessionId : "";
+  if (sessionId) cancelEspnOtpSession(sessionId);
+  return NextResponse.json({ status: "ok" });
 }

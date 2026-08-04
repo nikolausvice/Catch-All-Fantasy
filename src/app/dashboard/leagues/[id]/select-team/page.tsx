@@ -9,6 +9,7 @@ import { EspnApiError } from "@/lib/espn/client";
 import { getCachedEspnTeamSummaries, getCachedSleeperTeamSummaries } from "@/lib/leagues/cache";
 import { SleeperApiError } from "@/lib/sleeper/client";
 import type { LeagueTeamSummary } from "@/lib/leagues/types";
+import { RemoveLeagueButton } from "@/components/remove-league-button";
 import { TeamPickCard } from "./team-pick-card";
 
 const PLATFORM_LABEL: Record<string, string> = {
@@ -109,8 +110,21 @@ export default async function SelectTeamPage({
       </div>
 
       {error && (
-        <div className="rounded-xl border border-destructive/30 bg-destructive/10 p-4 text-sm text-destructive">
-          {error}
+        <div className="rounded-xl border border-destructive/30 bg-destructive/10 p-4">
+          <p className="text-sm text-destructive">{error}</p>
+          {league.platform === "espn" && (
+            <p className="mt-2 text-xs text-muted-foreground">
+              Sign in again via <span className="font-medium">+ Add league</span> on the
+              dashboard to restore it, or remove this league below.
+            </p>
+          )}
+          <div className="mt-3">
+            <RemoveLeagueButton
+              leagueRowId={league.id}
+              leagueName={league.leagueName}
+              redirectTo="/dashboard"
+            />
+          </div>
         </div>
       )}
 

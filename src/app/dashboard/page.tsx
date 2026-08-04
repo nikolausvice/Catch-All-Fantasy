@@ -1,12 +1,13 @@
 import Link from "next/link";
 import { Fragment } from "react";
-import { desc, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { auth } from "@/auth";
 import { db } from "@/db/client";
-import { connectedLeagues } from "@/db/schema";
+import { connectedLeagues, platformIdentities } from "@/db/schema";
 import { AnalysisSection } from "@/components/analysis-section";
 import { AvatarImage } from "@/components/avatar-image";
 import { IntelTabs } from "@/components/intel-tabs";
+import { RemoveLeagueButton } from "@/components/remove-league-button";
 import { VennExplorer } from "@/components/venn-diagram";
 import type { VennComboInfo, VennSetInfo } from "@/components/venn-diagram";
 import { analyzeCrossLeague } from "@/lib/leagues/cross-league";
@@ -69,21 +70,23 @@ function toOverlapViewData(
       // this player compounds how much they can hurt you.
       const contexts = combo.leagueIds.map((leagueId) => {
         const info = setById.get(leagueId)!.players.get(id)!;
-        return { isOwn: leagueId.endsWith(":own"), projectedPoints: info.projectedPoints ?? 0, info };
+        return { leagueId, isOwn: leagueId.endsWith(":own"), projectedPoints: info.projectedPoints ?? 0, info };
       });
       const first = contexts[0].info;
-      const projectedPoints = Math.max(...contexts.map((c) => c.projectedPoints));
       const netValue = contexts.reduce(
         (sum, c) => sum + (c.isOwn ? c.projectedPoints : -c.projectedPoints),
         0,
+      );
+      const leagueValues = Object.fromEntries(
+        contexts.map((c) => [c.leagueId, c.isOwn ? c.projectedPoints : -c.projectedPoints]),
       );
       return {
         id,
         name: first.name,
         position: first.position,
         proTeam: first.proTeam,
-        projectedPoints,
         netValue,
+        leagueValues,
       };
     }),
   }));
@@ -165,22 +168,28 @@ function MatchupCard({
   if (error) {
     return (
       <div className="rounded-xl border border-destructive/30 bg-destructive/10 p-4">
-        <p className="text-sm font-medium">{league.leagueName}</p>
-        <p className="mt-1 text-xs text-destructive">{error}</p>
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <p className="text-sm font-medium">{league.leagueName}</p>
+            <p className="mt-1 text-xs text-destructive">{error}</p>
+          </div>
+          <RemoveLeagueButton
+            leagueRowId={league.id}
+            leagueName={league.leagueName}
+            redirectTo={null}
+          />
+        </div>
+        {league.platform === "espn" && (
+          <p className="mt-2 text-xs text-muted-foreground">
+            Sign in again via <span className="font-medium">+ Add league</span> above to restore
+            it instead.
+          </p>
+        )}
       </div>
     );
   }
 
   if (!matchup) return null;
-
-  const result =
-    matchup.opponent && matchup.teamScore != null && matchup.opponentScore != null
-      ? matchup.teamScore > matchup.opponentScore
-        ? "winning"
-        : matchup.teamScore < matchup.opponentScore
-          ? "losing"
-          : "tied"
-      : null;
 
   return (
     <Link
@@ -218,25 +227,17 @@ function MatchupCard({
       ) : (
         <TeamRow name="Bye" avatarUrl={null} score={null} isBye />
       )}
-
-      {(result === "winning" || result === "losing") && (
-        <p
-          className={`mt-2 text-xs font-medium ${
-            result === "winning" ? "text-primary" : "text-destructive"
-          }`}
-        >
-          {result === "winning" ? "You're winning" : "You're behind"}
-        </p>
-      )}
     </Link>
   );
 }
 
 function MatchupsTab({
   needsSetup,
+  needsReconnectIds,
   matchups,
 }: {
   needsSetup: LeagueRow[];
+  needsReconnectIds: Set<string>;
   matchups: { league: LeagueRow; matchup: LeagueMatchup | null; error: string | null }[];
 }) {
   return (
@@ -247,25 +248,43 @@ function MatchupsTab({
             Finish setup
           </h2>
           <ul className="flex flex-col gap-3">
-            {needsSetup.map((league) => (
-              <li key={league.id}>
-                <Link
-                  href={`/dashboard/leagues/${league.id}/select-team`}
-                  className="flex min-h-[44px] items-center justify-between gap-3 rounded-xl border border-dashed border-border bg-card p-4 hover:bg-muted"
+            {needsSetup.map((league) => {
+              const needsReconnect = needsReconnectIds.has(league.id);
+              return (
+                <li
+                  key={league.id}
+                  className="flex min-h-[44px] items-center justify-between gap-3 rounded-xl border border-dashed border-border bg-card p-4"
                 >
                   <div className="min-w-0">
                     <p className="truncate font-medium">{league.leagueName}</p>
                     <p className="text-xs text-muted-foreground">
                       {PLATFORM_LABEL[league.platform] ?? league.platform} ·{" "}
                       {league.season}
+                      {needsReconnect && (
+                        <span className="text-destructive">
+                          {" "}
+                          · No saved ESPN login for this league — sign in again via + Add league
+                        </span>
+                      )}
                     </p>
                   </div>
-                  <span className="shrink-0 text-xs font-medium text-primary">
-                    Pick your team →
-                  </span>
-                </Link>
-              </li>
-            ))}
+                  {needsReconnect ? (
+                    <RemoveLeagueButton
+                      leagueRowId={league.id}
+                      leagueName={league.leagueName}
+                      redirectTo={null}
+                    />
+                  ) : (
+                    <Link
+                      href={`/dashboard/leagues/${league.id}/select-team`}
+                      className="shrink-0 text-xs font-medium text-primary hover:underline"
+                    >
+                      Pick your team →
+                    </Link>
+                  )}
+                </li>
+              );
+            })}
           </ul>
         </section>
       )}
@@ -309,6 +328,20 @@ export default async function DashboardPage() {
   const needsSetup = leagues.filter((league) => !league.userTeamId);
   const ready = leagues.filter((league) => league.userTeamId);
 
+  // Leagues that need setup never attempt a live ESPN fetch on this page (that only
+  // happens once a team's picked), so a missing saved login would otherwise go
+  // unnoticed until the user clicks through to a dead end. Check for it up front instead.
+  const espnIdentities = await db.query.platformIdentities.findMany({
+    where: and(eq(platformIdentities.userId, userId), eq(platformIdentities.platform, "espn")),
+    columns: { platformUserId: true },
+  });
+  const validEspnSwids = new Set(espnIdentities.map((i) => i.platformUserId));
+  const needsReconnectIds = new Set(
+    needsSetup
+      .filter((l) => l.platform === "espn" && l.platformUserId && !validEspnSwids.has(l.platformUserId))
+      .map((l) => l.id),
+  );
+
   const week = ready.length > 0 ? await getCurrentNflWeek() : 0;
   const season = Number(ready.find((l) => l.platform !== "demo")?.season) || new Date().getFullYear();
   const statusByTeam: Map<string, GameStatus> =
@@ -339,27 +372,8 @@ export default async function DashboardPage() {
   const opponentRosterSets = buildRosterSets(matchups, "opponent");
   const overlap = toOverlapViewData(ownRosterSets, opponentRosterSets);
 
-  const failedLeagues = matchups.filter((m) => m.error);
-
   return (
     <div className="flex flex-col gap-6">
-      {failedLeagues.length > 0 && (
-        <div className="rounded-xl border border-destructive/30 bg-destructive/10 p-4 text-sm text-destructive">
-          <p className="font-medium">
-            {failedLeagues.length === 1
-              ? "1 league couldn't be loaded and is excluded below:"
-              : `${failedLeagues.length} leagues couldn't be loaded and are excluded below:`}
-          </p>
-          <ul className="mt-1.5 list-inside list-disc">
-            {failedLeagues.map((m) => (
-              <li key={m.leagueId}>
-                {m.leagueName} — {m.error}
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-
       {leagues.length === 0 ? (
         <div className="rounded-xl border border-dashed border-border p-8 text-center text-sm text-muted-foreground">
           No leagues connected yet. Add one above to get started.
@@ -368,7 +382,11 @@ export default async function DashboardPage() {
         <IntelTabs
           overview={
             <Fragment key="overview">
-              <MatchupsTab needsSetup={needsSetup} matchups={matchups} />
+              <MatchupsTab
+                needsSetup={needsSetup}
+                needsReconnectIds={needsReconnectIds}
+                matchups={matchups}
+              />
             </Fragment>
           }
           rootingAndOverlap={
