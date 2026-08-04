@@ -266,6 +266,20 @@ export async function connectEspnAccount(
   return { error: null, success: `Imported "${league.name}".` };
 }
 
+/** Forgets the saved ESPN login (espn_s2/SWID). Already-connected leagues stay connected — this only
+ * removes the credential used to look up new ones / refresh private-league data going forward. */
+export async function disconnectEspnAccount(): Promise<{ error: string | null }> {
+  const userId = await requireSessionUserId();
+  if (!userId) return { error: STALE_SESSION_MESSAGE };
+
+  await db
+    .delete(platformIdentities)
+    .where(and(eq(platformIdentities.userId, userId), eq(platformIdentities.platform, "espn")));
+
+  revalidatePath("/dashboard");
+  return { error: null };
+}
+
 export type EspnLookupState = {
   error: string | null;
   result: {

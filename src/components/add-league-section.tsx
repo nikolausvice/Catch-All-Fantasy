@@ -74,12 +74,7 @@ export function AddLeagueSection({ hasStoredEspnCookies }: { hasStoredEspnCookie
 
             {selected === "espn" && (
               <div>
-                <h3 className="mb-1 text-sm font-semibold">Connect ESPN</h3>
-                <p className="mb-4 text-sm text-muted-foreground">
-                  {hasStoredEspnCookies
-                    ? "League ID and season are all you need — we'll reuse your saved ESPN login for private leagues."
-                    : "League ID and season are enough for public leagues; private leagues also need the espn_s2 and SWID cookies."}
-                </p>
+                <h3 className="mb-4 text-sm font-semibold">Connect ESPN</h3>
                 <ConnectEspnForm hasStoredCookies={hasStoredEspnCookies} />
               </div>
             )}

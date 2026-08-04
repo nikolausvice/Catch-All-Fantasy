@@ -6,6 +6,12 @@ import { headerButtonClass } from "@/lib/utils";
 
 export function AddLeagueButton({ hasStoredEspnCookies }: { hasStoredEspnCookies: boolean }) {
   const dialogRef = useRef<HTMLDialogElement>(null);
+  // A `click` event's target is resolved from where the mouse is *released*,
+  // not where it went down. Selecting text inside the dialog and dragging
+  // past its edge before releasing lands the click on the dialog itself —
+  // same as a real backdrop click — closing it unintentionally. Only close
+  // when BOTH the mousedown and the click landed on the backdrop.
+  const backdropMouseDownRef = useRef(false);
 
   return (
     <>
@@ -18,8 +24,13 @@ export function AddLeagueButton({ hasStoredEspnCookies }: { hasStoredEspnCookies
       </button>
       <dialog
         ref={dialogRef}
+        onMouseDown={(e) => {
+          backdropMouseDownRef.current = e.target === e.currentTarget;
+        }}
         onClick={(e) => {
-          if (e.target === e.currentTarget) dialogRef.current?.close();
+          if (backdropMouseDownRef.current && e.target === e.currentTarget) {
+            dialogRef.current?.close();
+          }
         }}
         className="m-auto w-full max-w-lg rounded-xl border border-border bg-card p-0 text-foreground backdrop:bg-black/50"
       >
