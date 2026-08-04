@@ -4,7 +4,6 @@ import { and, eq } from "drizzle-orm";
 import { auth } from "@/auth";
 import { db } from "@/db/client";
 import { connectedLeagues } from "@/db/schema";
-import { computeMatchupWinProb } from "@/lib/leagues/cross-league";
 import { getNflGameStatuses, type GameStatus } from "@/lib/leagues/nfl-schedule";
 import { getScoreOverrides } from "@/lib/leagues/score-overrides";
 import { getCurrentNflWeek } from "@/lib/leagues/week";
@@ -231,17 +230,6 @@ export default async function LeagueDetailPage({
     matchup && league.platform !== "demo"
       ? await getNflGameStatuses(Number(league.season), matchup.week)
       : new Map<string, GameStatus>();
-  const winProb = matchup ? computeMatchupWinProb(matchup, statusByTeam) : null;
-  const winPct = winProb ? Math.round(winProb.winProbability * 100) : 0;
-  const winBarColor =
-    winPct >= 60 ? "bg-emerald-500" : winPct <= 40 ? "bg-red-500" : "bg-amber-400";
-  const winTextColor =
-    winPct >= 60
-      ? "text-emerald-500"
-      : winPct <= 40
-        ? "text-red-500"
-        : "text-amber-500";
-
   return (
     <div className="flex flex-col gap-6">
       {/* Header */}
@@ -355,23 +343,6 @@ export default async function LeagueDetailPage({
               </div>
             )}
           </div>
-
-          {winProb && !winProb.isBye && (
-            <div className="flex items-center gap-3 rounded-xl border border-border bg-card p-4">
-              <p className="shrink-0 text-xs font-semibold uppercase tracking-widest text-muted-foreground">
-                Win prob
-              </p>
-              <div className="relative h-1.5 flex-1 overflow-hidden rounded-full bg-muted">
-                <div
-                  className={`absolute inset-y-0 left-0 rounded-full transition-all ${winBarColor}`}
-                  style={{ width: `${winPct}%` }}
-                />
-              </div>
-              <span className={`w-10 shrink-0 text-right text-sm font-bold tabular-nums ${winTextColor}`}>
-                {winPct}%
-              </span>
-            </div>
-          )}
 
           {/* Roster — bye weeks reuse the same mirrored layout with an empty
               opponent side, rather than a different single-panel view, so

@@ -46,6 +46,8 @@ export interface PerformanceSample {
   mode: number;
   /** Probability (0–1) that the win count actually lands on `mode` at this performance level. */
   modeProbability: number;
+  /** Full probability mass over win counts (index = win count) at this exact performance level, summing to 1 — spread across several values when other unresolved players could still swing it, concentrated on one once they're locked in. */
+  distribution: number[];
 }
 
 export interface OutcomeRegion {
@@ -245,15 +247,20 @@ function simulateAtR(
   targetAppearanceByLeague: Map<string, { role: PlayerRole; projectedPoints: number }>,
   otherAppearancesByPlayerLeague: Map<string, Map<string, { role: PlayerRole; projectedPoints: number }>>,
   trials: number,
+  // When sweeping a whole grid of r values for the same player, passing the
+  // same pre-drawn "other players" outcomes for every r (common random
+  // numbers) keeps each trial's hypothetical world consistent as r moves —
+  // otherwise every r independently re-rolls fresh noise, and a smooth,
+  // monotonic-per-world quantity comes out looking like jagged static.
+  presetDraws?: Map<string, number>[],
 ): number[] {
   const winCounts = new Array(simLeagues.length + 1).fill(0);
   const otherKeys = [...otherAppearancesByPlayerLeague.keys()];
 
   for (let t = 0; t < trials; t++) {
-    const draws = new Map<string, number>();
-    for (const key of otherKeys) {
-      draws.set(key, Math.max(0, 1 + gaussianRandom() * VARIANCE_COEFF));
-    }
+    const draws =
+      presetDraws?.[t] ??
+      new Map(otherKeys.map((key) => [key, Math.max(0, 1 + gaussianRandom() * VARIANCE_COEFF)]));
 
     let wins = 0;
     for (const league of simLeagues) {
@@ -325,7 +332,6 @@ function computePlayerLandscape(
   others: RemainingPlayerEntry[],
   activeLeagues: { leagueId: string; leagueName: string; matchup: LeagueMatchup }[],
   lockedByLeague: Map<string, { mine: number; opp: number }>,
-  totalMatchups: number,
   optimizationGoal: OptimizationGoal,
   opts: typeof DEFAULTS,
 ): PlayerOutcomeLandscape {
@@ -333,6 +339,12 @@ function computePlayerLandscape(
   for (const a of target.appearances) {
     targetAppearanceByLeague.set(a.leagueId, { role: a.role, projectedPoints: a.projectedPoints });
   }
+
+  // A player's card only reflects the record across leagues they actually
+  // play in — not the whole connected portfolio — since their performance
+  // has no bearing on matchups they don't appear in.
+  const playerLeagues = activeLeagues.filter(({ leagueId }) => targetAppearanceByLeague.has(leagueId));
+  const totalMatchups = playerLeagues.length;
 
   const otherAppearancesByPlayerLeague = new Map<
     string,
@@ -344,7 +356,7 @@ function computePlayerLandscape(
     otherAppearancesByPlayerLeague.set(o.key, byLeague);
   }
 
-  const simLeagues: SimLeague[] = activeLeagues.map(({ leagueId, leagueName }) => {
+  const simLeagues: SimLeague[] = playerLeagues.map(({ leagueId, leagueName }) => {
     const locked = lockedByLeague.get(leagueId)!;
     const otherMineKeys = others
       .filter((o) => o.appearances.some((a) => a.leagueId === leagueId && a.role === "mine"))
@@ -355,12 +367,26 @@ function computePlayerLandscape(
     return { leagueId, leagueName, lockedMine: locked.mine, lockedOpp: locked.opp, otherMineKeys, otherOppKeys };
   });
 
-  const hasOtherRemaining = others.length > 0;
+  const relevantLeagueIds = new Set(playerLeagues.map((l) => l.leagueId));
+  const hasOtherRemaining = others.some((o) =>
+    o.appearances.some((a) => relevantLeagueIds.has(a.leagueId)),
+  );
   const trials = hasOtherRemaining ? opts.baseTrials : 1;
   const refineTrials = hasOtherRemaining ? opts.refineTrials : 1;
 
   const run = (r: number, t: number) =>
     simulateAtR(r, simLeagues, targetAppearanceByLeague, otherAppearancesByPlayerLeague, t);
+
+  // Same draws reused at every grid point below, so the sweep across r is
+  // smooth per-trial instead of independently re-randomized at each point.
+  const otherKeys = [...otherAppearancesByPlayerLeague.keys()];
+  const gridDraws: Map<string, number>[] | undefined = hasOtherRemaining
+    ? Array.from({ length: trials }, () =>
+        new Map(otherKeys.map((key) => [key, Math.max(0, 1 + gaussianRandom() * VARIANCE_COEFF)])),
+      )
+    : undefined;
+  const runGrid = (r: number) =>
+    simulateAtR(r, simLeagues, targetAppearanceByLeague, otherAppearancesByPlayerLeague, trials, gridDraws);
 
   // ── Base grid: dense, cheap samples across the whole axis ────────────────
   const step = opts.axisMax / (opts.axisSamples - 1);
@@ -368,8 +394,10 @@ function computePlayerLandscape(
   const gridModeProb: { mode: number; prob: number }[] = [];
   for (let i = 0; i < opts.axisSamples; i++) {
     const r = i * step;
-    const { mode, prob } = modeAndProb(run(r, trials));
-    samples.push({ r, mode, modeProbability: prob });
+    const counts = runGrid(r);
+    const { mode, prob } = modeAndProb(counts);
+    const countTotal = counts.reduce((a, b) => a + b, 0) || 1;
+    samples.push({ r, mode, modeProbability: prob, distribution: counts.map((c) => c / countTotal) });
     gridModeProb.push({ mode, prob });
   }
 
@@ -507,9 +535,19 @@ export function computeOutcomeLandscape(
   const players: PlayerOutcomeLandscape[] = [];
 
   for (const [targetKey, target] of remainingPlayers) {
+    // A landscape (a range of outcomes with a real optimal band) only makes
+    // sense for a player who's rostered by "mine" in one league and by an
+    // opponent in another — that's the only case where more points isn't
+    // simply always better. A player owned across several of your own
+    // teams (or facing you in several leagues without you owning them
+    // anywhere) has no such tension: any score helps or hurts uniformly,
+    // so there's no threshold worth visualizing.
+    const roles = new Set(target.appearances.map((a) => a.role));
+    if (roles.size < 2) continue;
+
     const others = [...remainingPlayers.values()].filter((r) => r.key !== targetKey);
     players.push(
-      computePlayerLandscape(target, others, activeLeagues, lockedByLeague, totalMatchups, optimizationGoal, opts),
+      computePlayerLandscape(target, others, activeLeagues, lockedByLeague, optimizationGoal, opts),
     );
   }
 

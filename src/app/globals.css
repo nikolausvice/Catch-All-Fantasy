@@ -17,6 +17,9 @@
   --destructive: oklch(0.58 0.22 25);
   --destructive-foreground: oklch(0.98 0.01 25);
   --ring: oklch(0.55 0.16 165);
+  --outcome-win: oklch(0.6 0.15 145);
+  --outcome-mid: oklch(0.75 0.15 55);
+  --outcome-loss: oklch(0.58 0.22 25);
 }
 
 .dark {
@@ -34,6 +37,9 @@
   --destructive: oklch(0.65 0.2 25);
   --destructive-foreground: oklch(0.15 0.01 25);
   --ring: oklch(0.72 0.15 165);
+  --outcome-win: oklch(0.72 0.15 145);
+  --outcome-mid: oklch(0.78 0.14 55);
+  --outcome-loss: oklch(0.65 0.2 25);
 }
 
 @theme inline {
@@ -51,6 +57,9 @@
   --color-destructive: var(--destructive);
   --color-destructive-foreground: var(--destructive-foreground);
   --color-ring: var(--ring);
+  --color-outcome-win: var(--outcome-win);
+  --color-outcome-mid: var(--outcome-mid);
+  --color-outcome-loss: var(--outcome-loss);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }

@@ -386,8 +386,12 @@ export default async function DashboardPage() {
           rootingAndOverlap={
             <VennExplorer sets={overlap.sets} combos={overlap.combos} />
           }
-          analysis={<AnalysisSection analysis={analysis} />}
-          outcomeLandscape={<OutcomeLandscapeSection landscape={outcomeLandscape} />}
+          outcomeLandscape={
+            <Fragment key="outcomes">
+              <AnalysisSection analysis={analysis} />
+              <OutcomeLandscapeSection landscape={outcomeLandscape} />
+            </Fragment>
+          }
         />
       )}
     </div>

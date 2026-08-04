@@ -5,7 +5,6 @@ import { useState } from "react";
 const TABS = [
   { key: "overview", label: "Overview" },
   { key: "players", label: "Players" },
-  { key: "analysis", label: "Analysis" },
   { key: "outcomes", label: "Outcomes" },
 ] as const;
 
@@ -14,12 +13,10 @@ type TabKey = (typeof TABS)[number]["key"];
 export function IntelTabs({
   overview,
   rootingAndOverlap,
-  analysis,
   outcomeLandscape,
 }: {
   overview: React.ReactNode;
   rootingAndOverlap: React.ReactNode;
-  analysis: React.ReactNode;
   outcomeLandscape: React.ReactNode;
 }) {
   const [active, setActive] = useState<TabKey>("overview");
@@ -47,7 +44,6 @@ export function IntelTabs({
 
       {active === "overview" && <div className="flex flex-col gap-8">{overview}</div>}
       {active === "players" && <div className="flex flex-col gap-8">{rootingAndOverlap}</div>}
-      {active === "analysis" && <div className="flex flex-col gap-8">{analysis}</div>}
       {active === "outcomes" && <div className="flex flex-col gap-8">{outcomeLandscape}</div>}
     </div>
   );
