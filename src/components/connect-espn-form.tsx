@@ -394,14 +394,11 @@ export function ConnectEspnForm({ hasStoredCookies }: { hasStoredCookies: boolea
 
   return (
     <div className="flex flex-col gap-3">
-      <EspnLookupFlow hasStoredCookies={hasStoredCookies} onManual={() => setManualFallback(true)} />
-      <button
-        type="button"
-        onClick={() => setVisibility(null)}
-        className="self-start text-sm text-muted-foreground hover:text-foreground"
-      >
-        ← Back
-      </button>
+      <EspnLookupFlow
+        hasStoredCookies={hasStoredCookies}
+        onManual={() => setManualFallback(true)}
+        onBack={() => setVisibility(null)}
+      />
     </div>
   );
 }
@@ -473,9 +470,11 @@ function PublicEspnLeagueForm() {
 function EspnLookupFlow({
   hasStoredCookies,
   onManual,
+  onBack,
 }: {
   hasStoredCookies: boolean;
   onManual: () => void;
+  onBack: () => void;
 }) {
   const [lookupState, lookupAction, lookupPending] = useActionState(lookupEspnLeagues, {
     error: null,
@@ -641,6 +640,14 @@ function EspnLookupFlow({
         {lookupState.error && (
           <p className="text-sm text-destructive">{lookupState.error}</p>
         )}
+
+        <button
+          type="button"
+          onClick={onBack}
+          className="self-start text-sm text-muted-foreground hover:text-foreground"
+        >
+          ← Back
+        </button>
       </form>
     );
   }
