@@ -74,6 +74,14 @@ export interface RemainingPlayerAnalysis {
   projectedPoints: number;
   /** Their current (live) score, if any context has reported one. */
   currentPoints: number;
+  /**
+   * The real player's own game status — "pre" (hasn't kicked off), "in"
+   * (live), or "post" (final) — same everywhere they're rostered, since
+   * it's a fact about their actual game, not about any specific league.
+   * Lets the UI filter the whole remaining-players list by this
+   * independently of the my/opponents/mix role split.
+   */
+  status: GameStatus;
   /** Per-league impact for this player. */
   leagues: {
     leagueName: string;
@@ -120,8 +128,17 @@ export interface RemainingPlayerAnalysis {
    */
   hasConflict: boolean;
   /**
+   * "mine" — your starter everywhere they're rostered, no conflict.
+   * "opponents" — an opponent's starter everywhere, no conflict.
+   * "mix" — both, i.e. hasConflict. Lets the UI offer a My/Opponents/Mix
+   * filter over every remaining starter, not just the ones in conflict.
+   */
+  category: "mine" | "opponents" | "mix";
+  /**
    * When hasConflict is true: the range of points that satisfies the most
-   * leagues simultaneously. null if no feasible sweet spot exists.
+   * leagues simultaneously. null if no feasible sweet spot exists, or if
+   * there's no conflict to have a sweet spot about (more points always
+   * helps — or always hurts — uniformly with only one role in play).
    */
   sweetSpot: { min: number; max: number } | null;
   /** True only when every league behind the sweet spot has this player as its last remaining starter. */
@@ -129,7 +146,9 @@ export interface RemainingPlayerAnalysis {
   /**
    * The full breakdown: every score band this player's final tally could
    * land in, and the resulting win-loss record across every league they
-   * affect (e.g. "2-0", "1-1", "0-2"). Empty when there's no conflict.
+   * affect (e.g. "2-0", "1-1", "0-2"). Computed for every player, not just
+   * conflicted ones — a "mine"-only or "opponents"-only player still has a
+   * real per-league win/loss chart, just no cross-role trade-off.
    */
   recordBands: { min: number; max: number | null; wins: number; losses: number }[];
 }
@@ -268,6 +287,19 @@ function resolveGameStatus(
   statusByTeam?: Map<string, GameStatus>,
 ): GameStatus | undefined {
   return p.gameStatus ?? statusByTeam?.get(normalizeTeamAbbrev(p.proTeam));
+}
+
+/**
+ * A definite pre/in/post for display/filtering, even when nothing gave us
+ * one directly (the zero-points proxy has no concept of "in progress" —
+ * it's only ever "hasn't started" or "done" from its perspective).
+ */
+function derivedPlayerStatus(
+  p: LeagueTeamPlayer,
+  resolved: boolean,
+  statusByTeam?: Map<string, GameStatus>,
+): GameStatus {
+  return resolveGameStatus(p, statusByTeam) ?? (resolved ? "post" : "pre");
 }
 
 /**
@@ -718,6 +750,7 @@ export function analyzeCrossLeague(
     for (const player of matchup.team.players) {
       if (!player.isStarter) continue;
       const resolved = !isRemaining(player, status);
+      const derivedStatus = derivedPlayerStatus(player, resolved, status);
       // The TOTAL figure — their locked actual score once resolved, their
       // full projected total while pending. Always the FULL total, not just
       // what's still left to add: breakEven below is itself a total-points
@@ -764,8 +797,12 @@ export function analyzeCrossLeague(
           proTeam: player.proTeam,
           projectedPoints: pContribution,
           currentPoints: player.points ?? 0,
+          status: derivedStatus,
           leagues: [],
           hasConflict: false,
+          // Placeholder — finalized once every league for this player has
+          // been collected, in the "Detect conflicts" pass below.
+          category: "mine",
           sweetSpot: null,
           sweetSpotIsExact: false,
           recordBands: [],
@@ -775,6 +812,7 @@ export function analyzeCrossLeague(
       // Update to highest projection/current-points seen
       if (pContribution > entry.projectedPoints) entry.projectedPoints = pContribution;
       if ((player.points ?? 0) > entry.currentPoints) entry.currentPoints = player.points ?? 0;
+      entry.status = derivedStatus;
 
       entry.leagues.push({
         leagueName,
@@ -795,6 +833,7 @@ export function analyzeCrossLeague(
       for (const player of matchup.opponent.players) {
         if (!player.isStarter) continue;
         const resolved = !isRemaining(player, status);
+        const derivedStatus = derivedPlayerStatus(player, resolved, status);
         // See the matching comments above the "My starters" loop.
         const pContribution = resolved ? player.points ?? 0 : player.projectedPoints ?? 0;
         // See the matching comment above — same real-player identity as the
@@ -829,8 +868,12 @@ export function analyzeCrossLeague(
             proTeam: player.proTeam,
             projectedPoints: pContribution,
             currentPoints: player.points ?? 0,
+            status: derivedStatus,
             leagues: [],
             hasConflict: false,
+            // Placeholder — finalized once every league for this player
+            // has been collected, in the "Detect conflicts" pass below.
+            category: "mine",
             sweetSpot: null,
             sweetSpotIsExact: false,
             recordBands: [],
@@ -839,6 +882,7 @@ export function analyzeCrossLeague(
         }
         if (pContribution > entry.projectedPoints) entry.projectedPoints = pContribution;
         if ((player.points ?? 0) > entry.currentPoints) entry.currentPoints = player.points ?? 0;
+        entry.status = derivedStatus;
 
         entry.leagues.push({
           leagueName,
@@ -856,14 +900,18 @@ export function analyzeCrossLeague(
     }
   }
 
-  // Detect conflicts and compute sweet spots
+  // Detect conflicts, categorize, and compute sweet spots + record bands —
+  // for EVERY remaining player, not just conflicted ones, so a "mine"-only
+  // or "opponents"-only player still gets a real per-league win/loss chart
+  // (just no cross-role trade-off, hence no sweet spot).
   for (const entry of remainingByPlayer.values()) {
     const yourLeagues = entry.leagues.filter((l) => l.role === "your-starter");
     const oppLeagues = entry.leagues.filter((l) => l.role === "opp-starter");
 
-    if (yourLeagues.length > 0 && oppLeagues.length > 0) {
-      entry.hasConflict = true;
+    entry.hasConflict = yourLeagues.length > 0 && oppLeagues.length > 0;
+    entry.category = entry.hasConflict ? "mix" : yourLeagues.length > 0 ? "mine" : "opponents";
 
+    if (entry.hasConflict) {
       // Sweet spot is actionable guidance ("what should this player do from
       // here"), so it's built only from leagues still actually pending —
       // a resolved league has nothing left to root for, and folding its
@@ -895,8 +943,12 @@ export function analyzeCrossLeague(
         entry.sweetSpotIsExact =
           pendingYourLeagues.every((l) => l.isExact) && pendingOppLeagues.every((l) => l.isExact);
       }
-      entry.recordBands = computeRecordBands(yourLeagues, oppLeagues);
     }
+    // Unconditional — a player with only one role still has a real
+    // win/loss record as their score crosses each league's threshold, it
+    // just never mixes wins and losses at the same time the way a conflict
+    // does.
+    entry.recordBands = computeRecordBands(yourLeagues, oppLeagues);
   }
 
   // Sort: conflicts first (most impactful), then by projectedPoints desc

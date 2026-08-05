@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import type { CrossLeagueAnalysis, RemainingPlayerAnalysis } from "@/lib/leagues/cross-league";
+import type { GameStatus } from "@/lib/leagues/nfl-schedule";
 
 /**
  * Wins → red (bad) / green (good) — used only for the aggregate win-count
@@ -181,7 +182,7 @@ function computePlayerDomain(
   return { min, max: max > min ? max : min + 10 };
 }
 
-function ConflictPlayerCard({ entry }: { entry: RemainingPlayerAnalysis }) {
+function PlayerOutcomeCard({ entry }: { entry: RemainingPlayerAnalysis }) {
   // A negative break-even is real math ("you're covered even at 0"), but a
   // skill player can't actually score below zero, so seeing "-4" reads as
   // confusing rather than informative. Defenses genuinely can go negative,
@@ -323,7 +324,9 @@ function ConflictPlayerCard({ entry }: { entry: RemainingPlayerAnalysis }) {
           })}
         </div>
       </div>
-      <div className="relative h-6 w-full">
+      {/* mt-2: a little breathing room below the league badges before the
+          chart starts — they were sitting right on top of each other. */}
+      <div className="relative mt-2 h-6 w-full">
         <svg
           viewBox="0 0 100 10"
           preserveAspectRatio="none"
@@ -501,36 +504,117 @@ function ConflictPlayerCard({ entry }: { entry: RemainingPlayerAnalysis }) {
   );
 }
 
-function ConflictPlayersTable({ players }: { players: RemainingPlayerAnalysis[] }) {
-  const conflicted = players.filter((p) => p.hasConflict && p.leagues.length > 1);
-  if (conflicted.length === 0) return null;
+const CATEGORY_FILTERS: { key: RemainingPlayerAnalysis["category"]; label: string }[] = [
+  { key: "mine", label: "My Leagues" },
+  { key: "opponents", label: "Opponents" },
+  { key: "mix", label: "Mix" },
+];
 
-  return (
-    <div className="flex flex-col gap-3">
-      {conflicted.map((entry) => (
-        <ConflictPlayerCard key={entry.playerId} entry={entry} />
-      ))}
-    </div>
-  );
-}
+const STATUS_FILTERS: { key: GameStatus; label: string }[] = [
+  { key: "in", label: "Playing" },
+  { key: "post", label: "Final" },
+  { key: "pre", label: "Pregame" },
+];
 
-function Section({
-  title,
-  description,
+function FilterPill({
+  isActive,
+  onClick,
   children,
 }: {
-  title: string;
-  description?: string;
+  isActive: boolean;
+  onClick: () => void;
   children: React.ReactNode;
 }) {
   return (
-    <section className="flex flex-col gap-3">
-      <div>
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">{title}</h2>
-        {description && <p className="mt-0.5 text-xs text-muted-foreground">{description}</p>}
-      </div>
+    <button
+      type="button"
+      aria-pressed={isActive}
+      onClick={onClick}
+      className={`rounded-full px-2.5 py-1 text-xs font-semibold transition-colors ${
+        isActive
+          ? "bg-primary text-primary-foreground"
+          : "border border-border text-muted-foreground hover:bg-muted"
+      }`}
+    >
       {children}
-    </section>
+    </button>
+  );
+}
+
+function PlayerOutcomesSection({
+  players,
+  winCountDistribution,
+}: {
+  players: RemainingPlayerAnalysis[];
+  winCountDistribution: number[] | null;
+}) {
+  // Every remaining starter, for or against, in one league or several — not
+  // just the ones in conflict — split into three role-mix views rather than
+  // shown all at once, since a "mine"-only player's card (no trade-off to
+  // weigh) and a "mix" player's card (a real trade-off) answer different
+  // questions and don't belong side by side by default.
+  const [category, setCategory] = useState<RemainingPlayerAnalysis["category"]>("mix");
+  // Status is a separate, independently-toggleable dimension (not one-of-
+  // three like category) — you might want "Playing + Final" together to
+  // hide the ones you can't act on yet, or just "Playing" alone. All three
+  // start selected so this filter has no effect until you narrow it.
+  const [statuses, setStatuses] = useState<Set<GameStatus>>(
+    () => new Set(STATUS_FILTERS.map((f) => f.key)),
+  );
+  function toggleStatus(key: GameStatus) {
+    setStatuses((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }
+
+  const filtered = players.filter((p) => p.category === category && statuses.has(p.status));
+
+  return (
+    <div className="flex flex-col gap-4">
+      {/* Sticky: this header (title, win-count histogram, both filter rows)
+          stays on screen while the card grid below it scrolls underneath —
+          the histogram and filters are exactly what you want visible while
+          scanning a long list of players, not something to scroll past.
+          top-[92px]/sm:top-[72px] approximates the site header's own height
+          (it's a responsive two-row/one-row header, not a fixed size) so
+          this sticks right underneath it rather than sliding under/over. */}
+      <div className="sticky top-[92px] z-[5] -mx-4 flex flex-col gap-3 bg-background px-4 pb-3 pt-1 sm:top-[72px]">
+        <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+          Win scenarios
+        </h2>
+        {winCountDistribution && <WinDistribution distribution={winCountDistribution} />}
+        <div className="flex flex-col gap-1.5">
+          <div className="flex flex-wrap gap-1.5">
+            {CATEGORY_FILTERS.map((f) => (
+              <FilterPill key={f.key} isActive={category === f.key} onClick={() => setCategory(f.key)}>
+                {f.label}
+              </FilterPill>
+            ))}
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {STATUS_FILTERS.map((f) => (
+              <FilterPill key={f.key} isActive={statuses.has(f.key)} onClick={() => toggleStatus(f.key)}>
+                {f.label}
+              </FilterPill>
+            ))}
+          </div>
+        </div>
+      </div>
+      {filtered.length === 0 ? (
+        <p className="rounded-xl border border-dashed border-border p-6 text-center text-sm text-muted-foreground">
+          No remaining players match these filters.
+        </p>
+      ) : (
+        <div className="grid gap-3 sm:grid-cols-2">
+          {filtered.map((entry) => (
+            <PlayerOutcomeCard key={entry.playerId} entry={entry} />
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -547,14 +631,12 @@ export function AnalysisSection({
     );
   }
 
+  if (analysis.remainingPlayers.length === 0) return null;
+
   return (
-    <div className="flex flex-col gap-8">
-      {analysis.totalMatchups > 1 && (
-        <Section title="Win scenarios">
-          <WinDistribution distribution={analysis.winCountDistribution} />
-          <ConflictPlayersTable players={analysis.remainingPlayers} />
-        </Section>
-      )}
-    </div>
+    <PlayerOutcomesSection
+      players={analysis.remainingPlayers}
+      winCountDistribution={analysis.totalMatchups > 1 ? analysis.winCountDistribution : null}
+    />
   );
 }
