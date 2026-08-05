@@ -1,18 +1,91 @@
+"use client";
+
+import { useState } from "react";
 import type { CrossLeagueAnalysis, RemainingPlayerAnalysis } from "@/lib/leagues/cross-league";
 
 /**
- * Three flat, solid states — losing (red), split (amber), winning (green) —
- * no blending between them: a continuous gradient reads a "51% toward
- * green" band as barely different from a "90% toward green" one, and a
- * blended midpoint never lands on a clean, nameable color. Same red/amber/
- * emerald hues as the Players tab's own/opponent/mix coloring
- * (--color-outcome-*, shared with outcome-landscape-section.tsx, themed in
- * globals.css), so a color means the same thing everywhere in the app.
+ * Wins → red (bad) / green (good) — used only for the aggregate win-count
+ * histogram (WinDistribution) below, where "how many of your N leagues do
+ * you win" really is the whole question. The per-player conflict cards use
+ * a different, more specific scheme — see computeComboBands.
  */
 function bandColor(wins: number, total: number): string {
   const frac = total > 0 ? wins / total : 0.5;
   if (frac === 0.5) return "var(--color-outcome-mid)";
   return frac > 0.5 ? "var(--color-outcome-win)" : "var(--color-outcome-loss)";
+}
+
+/**
+ * Fixed, ordered hues for a "mixed" combo (some leagues won, some lost) —
+ * distinct from the reserved win/loss green/red so a mixed outcome is never
+ * mistaken for a clean sweep or a clean shutout. Plain, saturated, easily-
+ * named colors (Tailwind's 500 step) rather than muted design-system
+ * pastels, so each one reads clearly at a glance: blue, purple, orange,
+ * yellow, pink, cyan. Assigned in this order as new combos are first
+ * encountered scanning left→right (see computeComboBands); never reused for
+ * a different combo within one card, never cycled once past the end.
+ */
+const MIXED_COMBO_COLORS = ["#3b82f6", "#a855f7", "#f97316", "#eab308", "#ec4899", "#06b6d4"];
+
+/**
+ * One color per DISTINCT combination of per-league win/loss for this
+ * player — not per aggregate win count. "1 of 2 leagues won" is ambiguous
+ * (could be either league); this instead answers "which one(s)," which is
+ * what a reader actually wants from a card about a specific player's
+ * specific leagues.
+ *
+ * Built from entry.recordBands (already correctly split at every pending
+ * league's threshold) plus each resolved league's fixed, already-decided
+ * result — every league, resolved or pending, gets a boolean in every
+ * band's `combo`, ordered to match entry.leagues.
+ */
+function computeComboBands(
+  entry: RemainingPlayerAnalysis,
+): { min: number; max: number | null; combo: boolean[]; color: string }[] {
+  const colorForCombo = new Map<string, string>();
+  let nextMixedColor = 0;
+
+  return entry.recordBands.map((band) => {
+    // A point safely inside the band, mirroring computeRecordBands' own
+    // convention — bands are constructed so the outcome is constant
+    // throughout, but evaluating exactly AT an edge is ambiguous when that
+    // edge is itself a threshold.
+    const testScore = band.max != null ? (band.min + band.max) / 2 : band.min + Math.max(1, Math.abs(band.min) * 0.1);
+
+    const combo = entry.leagues.map((l) => {
+      if (l.resolved) return l.resolvedWin === true;
+      const breakEven = l.breakEvenPoints ?? 0;
+      return l.role === "your-starter" ? testScore >= breakEven : testScore <= breakEven;
+    });
+
+    const key = combo.join(",");
+    let color = colorForCombo.get(key);
+    if (!color) {
+      if (combo.every(Boolean)) color = "var(--color-outcome-win)";
+      else if (combo.every((w) => !w)) color = "var(--color-outcome-loss)";
+      else {
+        color = MIXED_COMBO_COLORS[nextMixedColor % MIXED_COMBO_COLORS.length];
+        nextMixedColor++;
+      }
+      colorForCombo.set(key, color);
+    }
+
+    return { min: band.min, max: band.max, combo, color };
+  });
+}
+
+/** SVG element ids can't safely contain the characters normalizePlayerKey's
+ * keys or raw league ids might carry (spaces, "|", etc.) if they're going to
+ * be referenced via url(#id). */
+function sanitizeId(s: string): string {
+  return s.replace(/[^a-zA-Z0-9_-]/g, "-");
+}
+
+/** DEF/D-ST/DST — the position codes for a defense/special-teams unit, the
+ * one player type whose real scoring can legitimately go negative. */
+function isDefensePosition(position: string | null): boolean {
+  const p = (position ?? "").toUpperCase();
+  return p === "DST" || p === "DEF" || p === "D/ST";
 }
 
 /**
@@ -84,9 +157,19 @@ function WinDistribution({ distribution }: { distribution: number[] }) {
  * resolved league's breakEvenPoints is retrospective, not part of the live axis, and
  * stretching the domain to fit it would open a gap between the domain edge and where
  * the colored line (which also ignores resolved thresholds) actually starts.
+ *
+ * Also excludes any threshold that won't actually be plotted (a negative,
+ * already-covered one, hidden per allowNegativeDisplay) — otherwise the
+ * domain stretches to fit a marker that never gets drawn, squeezing every
+ * threshold that DOES get shown into a sliver on one side of the chart.
  */
-function computePlayerDomain(entry: RemainingPlayerAnalysis): { min: number; max: number } {
-  const pending = entry.leagues.filter((l) => !l.resolved);
+function computePlayerDomain(
+  entry: RemainingPlayerAnalysis,
+  allowNegativeDisplay: boolean,
+): { min: number; max: number } {
+  const pending = entry.leagues.filter(
+    (l) => !l.resolved && (allowNegativeDisplay || (l.breakEvenPoints ?? 0) >= 0),
+  );
   let min = 0;
   for (const l of pending) min = Math.min(min, l.breakEvenPoints ?? 0);
   const max = Math.max(
@@ -99,25 +182,46 @@ function computePlayerDomain(entry: RemainingPlayerAnalysis): { min: number; max
 }
 
 function ConflictPlayerCard({ entry }: { entry: RemainingPlayerAnalysis }) {
-  const { min: domainMin, max: domainMax } = computePlayerDomain(entry);
+  // A negative break-even is real math ("you're covered even at 0"), but a
+  // skill player can't actually score below zero, so seeing "-4" reads as
+  // confusing rather than informative. Defenses genuinely can go negative,
+  // and so can anyone whose live score has already gone negative — for
+  // everyone else, any negative threshold is hidden entirely (not shown as
+  // a misleading "0" — see the dividers filter below) rather than displayed.
+  const allowNegativeDisplay = isDefensePosition(entry.position) || entry.currentPoints < 0;
+  const { min: domainMin, max: domainMax } = computePlayerDomain(entry, allowNegativeDisplay);
   const span = domainMax - domainMin;
   const total = entry.leagues.length;
   const pct = (x: number) =>
     ((Math.min(Math.max(x, domainMin), domainMax) - domainMin) / span) * 100;
   const isLive = entry.currentPoints > 0;
+  const comboBands = computeComboBands(entry);
+  const uniqueCombos = [...new Map(comboBands.map((b) => [b.combo.join(","), b])).values()];
+  // Which legend swatch is currently clicked, if any — drives the win/loss
+  // border painted onto the league badges below, so the legend's job is to
+  // let you ask "what does THIS combo mean for each league" on demand
+  // rather than spelling every combo out at once.
+  const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  const selectedCombo = uniqueCombos.find((b) => b.combo.join(",") === selectedKey)?.combo ?? null;
 
   // Resolved leagues are excluded — their threshold is retrospective, not
   // part of this "what should they do from here" axis, and with
   // computePlayerDomain also excluding them, plotting one here would sit
   // right at (or past) the domain edge, disconnected from the colored line.
   //
-  // leftX/rightX are pre-clamped to the visible 0–100 range, and centerX is
-  // the midpoint of THOSE clamped edges rather than of the raw (unclamped)
-  // threshold — a box whose left edge got clamped to 0 is no longer centered
-  // on the raw value, so the "~" label needs to follow the box it's actually
-  // labeling, not the point that box was originally centered on.
-  const dividers = entry.leagues
-    .filter((l) => l.breakEvenPoints != null && !l.resolved)
+  // A negative, hidden-per-allowNegativeDisplay threshold is excluded too —
+  // otherwise we'd draw a real box at its real (often far-off) position but
+  // label it "0" because the true number is hidden, which is exactly the
+  // "why is there a box sitting around zero" confusion: the box's position
+  // and its label would no longer describe the same value. With nothing
+  // honest left to show, skip the marker entirely instead.
+  const rawDividers = entry.leagues
+    .filter(
+      (l) =>
+        l.breakEvenPoints != null &&
+        !l.resolved &&
+        (allowNegativeDisplay || l.breakEvenPoints >= 0),
+    )
     .map((l) => {
       const x = pct(l.breakEvenPoints!);
       // Uncertainty as width instead of a percentage: each OTHER
@@ -128,27 +232,91 @@ function ConflictPlayerCard({ entry }: { entry: RemainingPlayerAnalysis }) {
       const halfWidth = l.isExact ? 0 : 6 * (l.remainingOthers / (1 + l.remainingOthers));
       const leftX = Math.max(0, x - halfWidth);
       const rightX = Math.min(100, x + halfWidth);
-      return { league: l, leftX, rightX, centerX: (leftX + rightX) / 2 };
-    });
+
+      // The combo-band line normally cuts hard from one color to the next
+      // right at a threshold — accurate when that threshold is exact, but
+      // misleading when it's a range: the actual record could flip anywhere
+      // across [leftX, rightX], not at one precise pixel. Computed for every
+      // divider (not just non-exact ones) since a merged group below can mix
+      // exact and non-exact members and needs every member's colors to
+      // reconstruct the full sequence.
+      const before = comboBands.find((b) => b.max === l.breakEvenPoints);
+      const after = comboBands.find((b) => b.min === l.breakEvenPoints);
+      const colorA = before?.color ?? after?.color ?? "var(--color-outcome-mid)";
+      const colorB = after?.color ?? colorA;
+      return { league: l, leftX, rightX, colorA, colorB };
+    })
+    .sort((a, b) => a.leftX - b.leftX);
+
+  // When two thresholds' boxes touch or overlap, showing two separate
+  // numbers under two separate (often visually colliding) boxes is more
+  // confusing than useful — merge them into one box spanning the whole
+  // cluster, with one number (the average of the merged thresholds) and a
+  // stripe carrying every color the cluster spans, not just two.
+  const MERGE_EPSILON = 0.01;
+  const dividerGroups: (typeof rawDividers)[] = [];
+  for (const d of rawDividers) {
+    const openGroup = dividerGroups[dividerGroups.length - 1];
+    const prev = openGroup?.[openGroup.length - 1];
+    if (prev && d.leftX <= prev.rightX + MERGE_EPSILON) {
+      openGroup.push(d);
+    } else {
+      dividerGroups.push([d]);
+    }
+  }
+
+  const dividers = dividerGroups.map((members) => {
+    const leftX = Math.min(...members.map((m) => m.leftX));
+    const rightX = Math.max(...members.map((m) => m.rightX));
+    const isSinglePoint = rightX - leftX < MERGE_EPSILON;
+    // colorA, then each member's colorB in order — adjacent members' colors
+    // chain (member[i].colorB === member[i+1].colorA) so this reconstructs
+    // every distinct combo-band color the whole merged span crosses.
+    const colors = [members[0].colorA, ...members.map((m) => m.colorB)];
+    const avgBreakEven =
+      members.reduce((sum, m) => sum + m.league.breakEvenPoints!, 0) / members.length;
+    const key = members.map((m) => m.league.leagueId).join("+");
+    return {
+      key,
+      leftX,
+      rightX,
+      centerX: (leftX + rightX) / 2,
+      isSinglePoint,
+      colors,
+      avgBreakEven,
+      patternId: isSinglePoint ? null : `stripe-${sanitizeId(entry.playerId)}-${sanitizeId(key)}`,
+    };
+  });
 
   return (
     <div className="flex flex-col gap-2 rounded-xl border border-border bg-card p-4">
       <div className="flex flex-col items-center gap-1 text-center">
         <p className="truncate text-sm font-medium">{entry.name}</p>
         <div className="flex flex-wrap justify-center gap-1">
-          {entry.leagues.map((l) => (
-            <span
-              key={l.leagueId}
-              title={l.description}
-              className={`inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${
-                l.role === "your-starter"
-                  ? "bg-emerald-500/15 text-emerald-400"
-                  : "bg-red-500/15 text-red-400"
-              }`}
-            >
-              {l.role === "your-starter" ? "↑" : "↓"} {l.leagueName}
-            </span>
-          ))}
+          {entry.leagues.map((l, i) => {
+            // Red/green here is reserved for ONE thing: the win/loss border
+            // from the legend selection. Role identity (your starter vs.
+            // opponent's) is carried entirely by the ↑/↓ glyph, with plain
+            // neutral text — coloring the text red/green by role too would
+            // have it fighting the border's red/green for the same two
+            // colors, so a green-text/red-border (or vice versa) badge read
+            // as contradictory instead of as two separate facts.
+            const borderClass = !selectedCombo
+              ? "border-border"
+              : selectedCombo[i]
+              ? "border-emerald-600 dark:border-emerald-400"
+              : "border-red-600 dark:border-red-400";
+            return (
+              <span
+                key={l.leagueId}
+                title={l.description}
+                className={`inline-flex items-center gap-0.5 rounded-full border px-1.5 py-0.5 text-[10px] font-semibold text-foreground transition-colors ${borderClass}`}
+              >
+                <span aria-hidden="true">{l.role === "your-starter" ? "↑" : "↓"}</span>
+                {l.leagueName}
+              </span>
+            );
+          })}
         </div>
       </div>
       <div className="relative h-6 w-full">
@@ -157,42 +325,93 @@ function ConflictPlayerCard({ entry }: { entry: RemainingPlayerAnalysis }) {
           preserveAspectRatio="none"
           className="h-full w-full overflow-visible"
           role="img"
-          aria-label={`${entry.name}'s record across ${total} leagues as a function of their points, currently at ${entry.currentPoints.toFixed(1)}. Green is a winning record, red losing, amber split. Each threshold is drawn as a box that widens the more other unfinished starters could still move it, collapsing to a single line when this player is the last one left.`}
+          aria-label={`${entry.name}'s record across ${total} leagues as a function of their points, currently at ${entry.currentPoints.toFixed(1)}. Each distinct combination of which leagues win gets its own color, listed below the chart. Each threshold is drawn as a box that widens the more other unfinished starters could still move it, collapsing to a single line when this player is the last one left.`}
         >
-          {entry.recordBands.map((band, i) => (
+          <defs>
+            {dividers
+              .filter((d) => d.patternId)
+              .map((d) => {
+                const n = d.colors.length;
+                const unit = 1.2;
+                return (
+                  <pattern
+                    key={d.patternId}
+                    id={d.patternId!}
+                    width={n * unit}
+                    height={n * unit}
+                    patternUnits="userSpaceOnUse"
+                    patternTransform="rotate(45)"
+                  >
+                    {d.colors.map((c, i) => (
+                      <rect key={i} x={i * unit} width={unit} height={n * unit} fill={c} />
+                    ))}
+                  </pattern>
+                );
+              })}
+          </defs>
+          {comboBands.map((band, i) => (
             <line
               key={i}
               x1={pct(band.min)}
               y1={5}
               x2={pct(band.max ?? domainMax)}
               y2={5}
-              stroke={bandColor(band.wins, total)}
+              stroke={band.color}
               strokeWidth={1.2}
             />
           ))}
-          {dividers.map(({ league: l, leftX, rightX }) =>
-            // Exact (this player is the last one left in that league) — a
-            // single bar, no box.
-            l.isExact ? (
+          {/* Uncertain span gets a diagonal stripe carrying every combo
+              color the merged box's range crosses (not just "before" and
+              "after"), since the record could really flip anywhere across
+              this width, not at one precise pixel. */}
+          {dividers
+            .filter((d) => d.patternId)
+            .map((d) => (
+              <rect
+                key={`stripe-${d.key}`}
+                x={d.leftX}
+                y={4.4}
+                width={d.rightX - d.leftX}
+                height={1.2}
+                fill={`url(#${d.patternId})`}
+              />
+            ))}
+          {dividers.map((d) =>
+            // Adjacent/overlapping thresholds are merged above into one box
+            // (or, if every merged member individually collapsed to zero
+            // width, one single bar) instead of several separate ones that
+            // would otherwise visually collide.
+            //
+            // vectorEffect="non-scaling-stroke" on both: the svg's viewBox
+            // is stretched non-uniformly (much wider than tall) to fill the
+            // chart, so a plain strokeWidth renders horizontal edges
+            // thinner than vertical ones (the same root cause as the
+            // stretched-dot fix elsewhere in this file, just showing up in
+            // line thickness instead of a circle's radius). This keeps
+            // every edge — top, bottom, left, right — the same true pixel
+            // width regardless of that stretch.
+            d.isSinglePoint ? (
               <line
-                key={l.leagueId}
-                x1={leftX}
+                key={`bar-${d.key}`}
+                x1={d.leftX}
                 y1={0}
-                x2={leftX}
+                x2={d.leftX}
                 y2={10}
                 stroke="white"
-                strokeWidth={0.5}
+                strokeWidth={1.5}
+                vectorEffect="non-scaling-stroke"
               />
             ) : (
               <rect
-                key={l.leagueId}
-                x={leftX}
+                key={`box-${d.key}`}
+                x={d.leftX}
                 y={0.5}
-                width={rightX - leftX}
+                width={d.rightX - d.leftX}
                 height={9}
                 fill="none"
                 stroke="white"
-                strokeWidth={0.5}
+                strokeWidth={1.5}
+                vectorEffect="non-scaling-stroke"
               />
             ),
           )}
@@ -214,25 +433,60 @@ function ConflictPlayerCard({ entry }: { entry: RemainingPlayerAnalysis }) {
         )}
       </div>
       <div className="relative h-4 w-full">
-        {dividers.map(({ league: l, centerX }) => (
-          <span
-            key={l.leagueId}
-            // Sign carries the meaning here (needs more vs. already
-            // covered), so it's colored instead of prefixed with a "~" —
-            // that symbol read as too easily confused with the minus sign
-            // on a negative number.
-            className={`absolute -translate-x-1/2 whitespace-nowrap text-[10px] font-medium leading-none ${
-              l.breakEvenPoints! < 0
-                ? "text-red-600 dark:text-red-400"
-                : "text-emerald-600 dark:text-emerald-400"
-            }`}
-            // Centered on the box's own (possibly edge-clamped) midpoint,
-            // not the raw threshold — see the dividers comment above.
-            style={{ left: `${centerX}%` }}
-          >
-            {Math.round(l.breakEvenPoints!)}
-          </span>
-        ))}
+        {dividers.map((d) => {
+          // dividers already excludes any negative threshold that isn't
+          // allowed to be shown, so this is always the real, honest value —
+          // and, for a merged group, one number (the average of its
+          // members) instead of several colliding ones.
+          const displayValue = Math.round(d.avgBreakEven);
+          return (
+            <span
+              key={`label-${d.key}`}
+              // Sign carries the meaning here (needs more vs. already
+              // covered), so it's colored instead of prefixed with a "~" —
+              // that symbol read as too easily confused with the minus sign
+              // on a negative number.
+              className={`absolute -translate-x-1/2 whitespace-nowrap text-[10px] font-medium leading-none ${
+                displayValue < 0
+                  ? "text-red-600 dark:text-red-400"
+                  : "text-emerald-600 dark:text-emerald-400"
+              }`}
+              // Centered on the box's own (possibly edge-clamped) midpoint,
+              // not the raw threshold — see the dividers comment above.
+              style={{ left: `${d.centerX}%` }}
+            >
+              {displayValue}
+            </span>
+          );
+        })}
+      </div>
+      {/* Legend for the combo colors above — every card gets one, even a
+          single-swatch one (so "there's only one possible outcome here" is
+          itself shown, not just implied by an absent legend). Just the
+          swatches; clicking one asks the league badges above "what does
+          this combo mean for you," which answer by bordering themselves
+          green/red, rather than the legend spelling out every league's
+          outcome up front. */}
+      <div className="flex flex-wrap justify-center gap-1.5">
+        {uniqueCombos.map((band) => {
+          const key = band.combo.join(",");
+          const isSelected = key === selectedKey;
+          return (
+            <button
+              key={key}
+              type="button"
+              aria-pressed={isSelected}
+              title={entry.leagues
+                .map((l, i) => `${l.leagueName}: ${band.combo[i] ? "win" : "loss"}`)
+                .join(", ")}
+              onClick={() => setSelectedKey((prev) => (prev === key ? null : key))}
+              className={`h-4 w-4 shrink-0 rounded-sm ring-offset-2 ring-offset-card transition-shadow outline-none ${
+                isSelected ? "ring-2 ring-foreground" : ""
+              }`}
+              style={{ backgroundColor: band.color }}
+            />
+          );
+        })}
       </div>
     </div>
   );
