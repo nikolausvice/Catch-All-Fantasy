@@ -133,12 +133,18 @@ export const connectedLeagues = pgTable(
 );
 
 /**
- * A hand-typed score from the demo editor, applied on top of every league
- * (demo or real) where this same real-world player is rostered — keyed by
- * normalized name+position rather than any platform's own player id, since
- * that's the only identity shared across Sleeper/ESPN/demo. Deleting the row
- * un-overrides the player, letting the platform's own live data (or the demo
- * roster's stored value) be authoritative again.
+ * A hand-typed score (and/or game status) from the demo editor, applied on
+ * top of every league (demo or real) where this same real-world player is
+ * rostered — keyed by normalized name+position rather than any platform's
+ * own player id, since that's the only identity shared across
+ * Sleeper/ESPN/demo. Deleting the row un-overrides the player, letting the
+ * platform's own live data (or the demo roster's stored value) be
+ * authoritative again.
+ *
+ * points and gameStatus are independently nullable — a row can override just
+ * one without the other (e.g. mark someone "in progress" without also
+ * hand-typing a score), so a null here always means "no override for this
+ * field," not zero/no-status.
  */
 export const playerScoreOverrides = pgTable(
   "player_score_overrides",
@@ -152,7 +158,9 @@ export const playerScoreOverrides = pgTable(
     /** normalizePlayerKey(name, position) from roster-overlap.ts. */
     playerKey: text("playerKey").notNull(),
     playerName: text("playerName").notNull(),
-    points: real("points").notNull(),
+    points: real("points"),
+    /** "pre" | "in" | "post" — see GameStatus in nfl-schedule.ts. */
+    gameStatus: text("gameStatus"),
     updatedAt: timestamp("updatedAt", { mode: "date" })
       .notNull()
       .$defaultFn(() => new Date()),

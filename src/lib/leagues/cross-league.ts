@@ -256,49 +256,61 @@ function playerKey(platform: string, playerId: string): string {
 }
 
 /**
+ * A hand-set gameStatus (the demo editor's explicit override) always wins
+ * over the real NFL schedule lookup — it exists specifically so a demo
+ * scenario can be constructed directly ("has points but still in progress",
+ * "zero points but done playing") rather than only inferred from team
+ * abbreviation. Real platforms never set p.gameStatus, so this is a no-op
+ * for them.
+ */
+function resolveGameStatus(
+  p: LeagueTeamPlayer,
+  statusByTeam?: Map<string, GameStatus>,
+): GameStatus | undefined {
+  return p.gameStatus ?? statusByTeam?.get(normalizeTeamAbbrev(p.proTeam));
+}
+
+/**
  * Whether a starter's final score isn't locked in yet. Zero fantasy points
  * looks identical whether a player hasn't played or has already played and
- * scored nothing, so when a real NFL game-status map is available, prefer
- * it: "post" (game over) means their score is final even if it's 0; "pre"
- * or "in" means it isn't, even if their live points somehow read nonzero
- * (stat corrections). Falls back to the old zero-points proxy when no
- * schedule data is available (e.g. demo leagues, or a lookup miss).
+ * scored nothing, so when a game-status is available (explicit override or
+ * real NFL schedule), prefer it: "post" (game over) means their score is
+ * final even if it's 0; "pre" or "in" means it isn't, even if their live
+ * points somehow read nonzero (stat corrections). Falls back to the old
+ * zero-points proxy when no status is available at all (e.g. a demo player
+ * with no override, or a schedule lookup miss).
  */
 function isRemaining(p: LeagueTeamPlayer, statusByTeam?: Map<string, GameStatus>): boolean {
   if (!p.isStarter) return false;
-  if (statusByTeam) {
-    const status = statusByTeam.get(normalizeTeamAbbrev(p.proTeam));
-    if (status === "post") return false;
-    // "pre"/"in" is a definitive answer on its own — the game hasn't
-    // finished, so the player's score isn't locked in yet, regardless of
-    // whether the platform happened to supply a nonzero projection for
-    // them. Gating on projectedPoints here would silently drop a genuinely
-    // remaining starter whenever a league's projection data is missing or
-    // zero (a data-availability quirk, not a real "already resolved" state).
-    if (status === "pre" || status === "in") return true;
-    // No schedule entry — team is on a bye, or the lookup missed. Fall
-    // through to the proxy below, which has no definitive status to lean on.
-  }
+  const status = resolveGameStatus(p, statusByTeam);
+  if (status === "post") return false;
+  // "pre"/"in" is a definitive answer on its own — the game hasn't
+  // finished, so the player's score isn't locked in yet, regardless of
+  // whether the platform happened to supply a nonzero projection for
+  // them. Gating on projectedPoints here would silently drop a genuinely
+  // remaining starter whenever a league's projection data is missing or
+  // zero (a data-availability quirk, not a real "already resolved" state).
+  if (status === "pre" || status === "in") return true;
+  // No status at all — team is on a bye, the lookup missed, or (for demo)
+  // no override was set. Fall through to the proxy, which has no
+  // definitive status to lean on.
   return (p.points ?? 0) === 0 && (p.projectedPoints ?? 0) > 0;
 }
 
 /**
- * Same idea as isRemaining, but excludes players whose game is already
- * underway ("in") — used only by the simulation below, where a mid-game
- * player's current live points are already part of matchup.teamScore
- * (locked). Treating them as remaining there would draw their whole
- * projection on top of points already counted, double-counting them.
+ * What a still-uncertain player adds on TOP of matchup.teamScore/
+ * opponentScore to reach their expected final total. teamScore is a
+ * straight sum of every starter's current actual points, so it already
+ * includes this player's points whenever they're mid-game ("in") rather
+ * than not-yet-started ("pre") — adding their FULL projection on top of
+ * that would double-count whatever they've already scored. For a "pre"
+ * player points is 0 anyway, so this is identical to their full projection
+ * there; it only changes anything once a player can be "remaining" with
+ * nonzero points, which the gameStatus override (demo editor) allows for
+ * the first time.
  */
-function isNotYetStarted(p: LeagueTeamPlayer, statusByTeam?: Map<string, GameStatus>): boolean {
-  if (!p.isStarter) return false;
-  if (statusByTeam) {
-    const status = statusByTeam.get(normalizeTeamAbbrev(p.proTeam));
-    if (status === "post" || status === "in") return false;
-    // Definitive: the game hasn't kicked off, regardless of whether we have
-    // a nonzero projection for this player (see isRemaining above).
-    if (status === "pre") return true;
-  }
-  return (p.points ?? 0) === 0 && (p.projectedPoints ?? 0) > 0;
+function remainingContribution(p: LeagueTeamPlayer): number {
+  return (p.projectedPoints ?? 0) - (p.points ?? 0);
 }
 
 /**
@@ -403,6 +415,10 @@ interface SimLeague {
   lockedOpp: number;
   remainingMineKeys: string[];
   remainingOppKeys: string[];
+  /** Demo leagues are hand-typed fake data — there's no real game that could
+   * later get a stat correction, so the FLOOR_SD residual-uncertainty noise
+   * below doesn't apply to them the way it does to a real platform. */
+  isDemo: boolean;
 }
 
 /**
@@ -442,10 +458,17 @@ function simulateJointOutcomes(
 
   function registerPlayer(p: LeagueTeamPlayer): string {
     const key = normalizePlayerKey(p.name, p.position);
-    const mean = p.projectedPoints ?? 0;
+    // Mean is what's left to add on top of matchup.teamScore (which already
+    // has this player's current points baked in) — not their full
+    // projection, which would double-count whatever they've already
+    // scored while "in progress". sd stays keyed off the full projection
+    // (never negative, unlike remainingContribution once someone's already
+    // exceeded their projection) so variance doesn't collapse or invert.
+    const mean = remainingContribution(p);
+    const sd = (p.projectedPoints ?? 0) * VARIANCE_COEFF;
     const existing = players.get(key);
     if (!existing || mean > existing.mean) {
-      players.set(key, { mean, sd: mean * VARIANCE_COEFF });
+      players.set(key, { mean, sd });
     }
     return key;
   }
@@ -456,16 +479,17 @@ function simulateJointOutcomes(
     // status shouldn't override the score the user actually typed in.
     const status = platform === "demo" ? undefined : statusByTeam;
     const remainingMineKeys = matchup.team.players
-      .filter((p) => isNotYetStarted(p, status))
+      .filter((p) => isRemaining(p, status))
       .map(registerPlayer);
     const remainingOppKeys = matchup.opponent.players
-      .filter((p) => isNotYetStarted(p, status))
+      .filter((p) => isRemaining(p, status))
       .map(registerPlayer);
     leagues.push({
       lockedMine: matchup.teamScore ?? 0,
       lockedOpp: matchup.opponentScore ?? 0,
       remainingMineKeys,
       remainingOppKeys,
+      isDemo: platform === "demo",
     });
     seedParts.push(
       `${leagueId}:${matchup.teamScore}:${matchup.opponentScore}:${[...remainingMineKeys].sort().join(",")}:${[...remainingOppKeys].sort().join(",")}`,
@@ -498,8 +522,14 @@ function simulateJointOutcomes(
     for (const league of leagues) {
       const mineExtra = league.remainingMineKeys.reduce((s, k) => s + (draws.get(k) ?? 0), 0);
       const oppExtra = league.remainingOppKeys.reduce((s, k) => s + (draws.get(k) ?? 0), 0);
-      const finalMine = league.lockedMine + mineExtra + gaussianRandom(rng) * FLOOR_SD;
-      const finalOpp = league.lockedOpp + oppExtra + gaussianRandom(rng) * FLOOR_SD;
+      // A demo league's data is entirely hand-typed — there's no real game
+      // behind it that could later receive a stat correction, so even a
+      // fully-resolved (no remaining players) demo league should collapse
+      // to a clean, deterministic 100%/0% outcome instead of getting this
+      // noise term smeared across it.
+      const floorNoise = league.isDemo ? 0 : FLOOR_SD;
+      const finalMine = league.lockedMine + mineExtra + gaussianRandom(rng) * floorNoise;
+      const finalOpp = league.lockedOpp + oppExtra + gaussianRandom(rng) * floorNoise;
       if (finalMine > finalOpp) wins++;
     }
 
@@ -653,18 +683,19 @@ export function analyzeCrossLeague(
     const myRemaining = matchup.team.players.filter((p) => isRemaining(p, status));
     const oppRemaining = matchup.opponent.players.filter((p) => isRemaining(p, status));
     remainingCountByLeague.set(leagueId, myRemaining.length + oppRemaining.length);
-    // Computed from currentScore + each remaining starter's own projection
-    // (not the platform's aggregate teamProjectedScore/opponentProjectedScore)
-    // so that subtracting a specific remaining player's projection below
-    // — to get "final score without them" — is subtracting something that
-    // was actually included in the total. Demo leagues set their aggregate
-    // projected score equal to the current actual score (see demo.ts), which
-    // never includes remaining players at all; trusting that field here would
-    // silently double-discount the target player's own projection.
+    // Computed from currentScore + each remaining starter's own remaining
+    // contribution (not the platform's aggregate teamProjectedScore/
+    // opponentProjectedScore) so that subtracting a specific remaining
+    // player's contribution below — to get "final score without them" — is
+    // subtracting something that was actually included in the total. Demo
+    // leagues set their aggregate projected score equal to the current
+    // actual score (see demo.ts), which never includes remaining players at
+    // all; trusting that field here would silently double-discount the
+    // target player's own projection.
     leagueProjData.set(leagueId, {
-      myProj: (matchup.teamScore ?? 0) + myRemaining.reduce((s, p) => s + (p.projectedPoints ?? 0), 0),
+      myProj: (matchup.teamScore ?? 0) + myRemaining.reduce((s, p) => s + remainingContribution(p), 0),
       oppProj:
-        (matchup.opponentScore ?? 0) + oppRemaining.reduce((s, p) => s + (p.projectedPoints ?? 0), 0),
+        (matchup.opponentScore ?? 0) + oppRemaining.reduce((s, p) => s + remainingContribution(p), 0),
     });
   }
 
@@ -687,8 +718,15 @@ export function analyzeCrossLeague(
     for (const player of matchup.team.players) {
       if (!player.isStarter) continue;
       const resolved = !isRemaining(player, status);
-      // Whatever's actually baked into proj.myProj for this player: their
-      // locked actual score once resolved, their projection while pending.
+      // The TOTAL figure — their locked actual score once resolved, their
+      // full projected total while pending. Always the FULL total, not just
+      // what's still left to add: breakEven below is itself a total-points
+      // threshold (the same axis the current-points dot is plotted on), and
+      // subtracting anything less than the full total here would leave part
+      // of this player's own contribution still baked into "myWithout" —
+      // which would then drift as their live score changes, moving the
+      // threshold along with them instead of holding it fixed while their
+      // dot moves toward it.
       const pContribution = resolved ? player.points ?? 0 : player.projectedPoints ?? 0;
       // Same real-player identity as the rest of the app (roster-overlap.ts,
       // outcome-landscape.ts) — not playerKey's platform+raw-id scheme, which
@@ -757,6 +795,7 @@ export function analyzeCrossLeague(
       for (const player of matchup.opponent.players) {
         if (!player.isStarter) continue;
         const resolved = !isRemaining(player, status);
+        // See the matching comments above the "My starters" loop.
         const pContribution = resolved ? player.points ?? 0 : player.projectedPoints ?? 0;
         // See the matching comment above — same real-player identity as the
         // rest of the app, not the platform+raw-id scheme.

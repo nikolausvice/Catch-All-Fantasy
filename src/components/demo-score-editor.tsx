@@ -3,39 +3,71 @@
 import { useState, useTransition } from "react";
 import {
   clearAllPlayerScoreOverrides,
+  updateDemoGameStatus,
   updateDemoScores,
 } from "@/app/dashboard/leagues/[id]/actions";
+import type { GameStatus } from "@/lib/leagues/nfl-schedule";
 import type { LeagueMatchup, LeagueTeamPlayer } from "@/lib/leagues/types";
+
+const GAME_STATUS_OPTIONS: { value: GameStatus | ""; label: string }[] = [
+  { value: "", label: "Auto (from points)" },
+  { value: "pre", label: "Not started" },
+  { value: "in", label: "In progress" },
+  { value: "post", label: "Final" },
+];
 
 function EditableRow({
   player,
   value,
   onChange,
+  gameStatus,
+  onGameStatusChange,
 }: {
   player: LeagueTeamPlayer;
   value: number;
   onChange: (v: number) => void;
+  gameStatus: GameStatus | null;
+  onGameStatusChange: (v: GameStatus | null) => void;
 }) {
   return (
-    <div className="flex items-center justify-between gap-3 rounded-lg border border-border bg-background px-3 py-2">
-      <div className="min-w-0">
-        <p className="truncate text-sm font-medium">{player.name}</p>
-        <p className="truncate text-xs text-muted-foreground">
-          {[player.slot, player.position].filter(Boolean).join(" · ")}
-          {player.projectedPoints != null && ` · proj ${player.projectedPoints.toFixed(1)}`}
-        </p>
+    <div className="flex flex-col gap-2 rounded-lg border border-border bg-background px-3 py-2">
+      <div className="flex items-center justify-between gap-3">
+        <div className="min-w-0">
+          <p className="truncate text-sm font-medium">{player.name}</p>
+          <p className="truncate text-xs text-muted-foreground">
+            {[player.slot, player.position].filter(Boolean).join(" · ")}
+            {player.projectedPoints != null && ` · proj ${player.projectedPoints.toFixed(1)}`}
+          </p>
+        </div>
+        <input
+          type="number"
+          step="0.1"
+          inputMode="decimal"
+          value={value}
+          onChange={(e) => {
+            const v = e.target.valueAsNumber;
+            onChange(Number.isFinite(v) ? v : 0);
+          }}
+          className="w-20 shrink-0 rounded-md border border-border bg-card px-2 py-1 text-right text-sm tabular-nums outline-none focus:ring-1 focus:ring-ring"
+        />
       </div>
-      <input
-        type="number"
-        step="0.1"
-        inputMode="decimal"
-        value={value}
-        onChange={(e) => {
-          const v = e.target.valueAsNumber;
-          onChange(Number.isFinite(v) ? v : 0);
-        }}
-        className="w-20 shrink-0 rounded-md border border-border bg-card px-2 py-1 text-right text-sm tabular-nums outline-none focus:ring-1 focus:ring-ring"
-      />
+      {/* Independent of the score above — lets a scenario like "has points
+          but still in progress" or "zero points but done playing" be built
+          directly instead of only ever inferred from points === 0. */}
+      <label className="flex items-center justify-between gap-3 text-xs text-muted-foreground">
+        Playing?
+        <select
+          value={gameStatus ?? ""}
+          onChange={(e) => onGameStatusChange((e.target.value || null) as GameStatus | null)}
+          className="rounded-md border border-border bg-card px-2 py-1 text-xs outline-none focus:ring-1 focus:ring-ring"
+        >
+          {GAME_STATUS_OPTIONS.map((opt) => (
+            <option key={opt.value} value={opt.value}>
+              {opt.label}
+            </option>
+          ))}
+        </select>
+      </label>
     </div>
   );
 }
@@ -57,26 +89,43 @@ export function DemoScoreEditor({
   // collide two different players into the same input.
   const rowKey = (side: "mine" | "opp", p: LeagueTeamPlayer) => `${side}:${p.id}`;
 
+  const allStarters = [
+    ...myStarters.map((p) => ({ key: rowKey("mine", p), p })),
+    ...oppStarters.map((p) => ({ key: rowKey("opp", p), p })),
+  ];
+
   // Controlled per-player so edits survive re-renders; seeded once from the
   // current roster.
   const [values, setValues] = useState<Record<string, number>>(() => {
     const initial: Record<string, number> = {};
-    for (const p of myStarters) initial[rowKey("mine", p)] = p.points ?? 0;
-    for (const p of oppStarters) initial[rowKey("opp", p)] = p.points ?? 0;
+    for (const { key, p } of allStarters) initial[key] = p.points ?? 0;
     return initial;
   });
+  const [gameStatusValues, setGameStatusValues] = useState<Record<string, GameStatus | null>>(
+    () => {
+      const initial: Record<string, GameStatus | null> = {};
+      for (const { key, p } of allStarters) initial[key] = p.gameStatus ?? null;
+      return initial;
+    },
+  );
 
   function save() {
-    const updates = [
-      ...myStarters.map((p) => ({ key: rowKey("mine", p), p })),
-      ...oppStarters.map((p) => ({ key: rowKey("opp", p), p })),
-    ]
+    const updates = allStarters
       .filter(({ key }) => values[key] != null)
       .map(({ key, p }) => ({ name: p.name, position: p.position, points: values[key] }));
     setSaved(false);
     startTransition(async () => {
       await updateDemoScores(leagueRowId, updates);
       setSaved(true);
+    });
+  }
+
+  // A discrete choice rather than free-typed text, so it saves immediately
+  // on change instead of waiting for the batched "Save scores" button below.
+  function changeGameStatus(p: LeagueTeamPlayer, key: string, gameStatus: GameStatus | null) {
+    setGameStatusValues((prev) => ({ ...prev, [key]: gameStatus }));
+    startTransition(async () => {
+      await updateDemoGameStatus(leagueRowId, p.name, p.position, gameStatus);
     });
   }
 
@@ -112,6 +161,8 @@ export function DemoScoreEditor({
                   setSaved(false);
                   setValues((prev) => ({ ...prev, [key]: v }));
                 }}
+                gameStatus={gameStatusValues[key] ?? null}
+                onGameStatusChange={(v) => changeGameStatus(p, key, v)}
               />
             );
           })}
@@ -131,6 +182,8 @@ export function DemoScoreEditor({
                   setSaved(false);
                   setValues((prev) => ({ ...prev, [key]: v }));
                 }}
+                gameStatus={gameStatusValues[key] ?? null}
+                onGameStatusChange={(v) => changeGameStatus(p, key, v)}
               />
             );
           })}

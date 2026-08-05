@@ -158,18 +158,29 @@ const DEFAULTS = {
   refineSteps: 6,
 } satisfies Required<Omit<OutcomeLandscapeOptions, "optimizationGoal">>;
 
+/**
+ * A hand-set gameStatus (the demo editor's explicit override) always wins
+ * over the real NFL schedule lookup — see the matching helper in
+ * cross-league.ts for why.
+ */
+function resolveGameStatus(
+  p: LeagueTeamPlayer,
+  statusByTeam?: Map<string, GameStatus>,
+): GameStatus | undefined {
+  return p.gameStatus ?? statusByTeam?.get(normalizeTeamAbbrev(p.proTeam));
+}
+
 function isNotYetStarted(p: LeagueTeamPlayer, statusByTeam?: Map<string, GameStatus>): boolean {
   if (!p.isStarter) return false;
-  if (statusByTeam) {
-    const status = statusByTeam.get(normalizeTeamAbbrev(p.proTeam));
-    if (status === "post" || status === "in") return false;
-    // Definitive: the game hasn't kicked off, regardless of whether we have
-    // a nonzero projection for this player — gating on projectedPoints here
-    // would silently drop a genuinely remaining starter whenever a league's
-    // projection data happens to be missing or zero.
-    if (status === "pre") return true;
-    // No schedule entry (bye, or lookup miss) — fall through to the proxy below.
-  }
+  const status = resolveGameStatus(p, statusByTeam);
+  if (status === "post" || status === "in") return false;
+  // Definitive: the game hasn't kicked off, regardless of whether we have
+  // a nonzero projection for this player — gating on projectedPoints here
+  // would silently drop a genuinely remaining starter whenever a league's
+  // projection data happens to be missing or zero.
+  if (status === "pre") return true;
+  // No status at all (bye, lookup miss, or no override) — fall through to
+  // the proxy below.
   return (p.points ?? 0) === 0 && (p.projectedPoints ?? 0) > 0;
 }
 

@@ -469,7 +469,7 @@ function ConflictPlayerCard({ entry }: { entry: RemainingPlayerAnalysis }) {
           this combo mean for you," which answer by bordering themselves
           green/red, rather than the legend spelling out every league's
           outcome up front. */}
-      <div className="flex flex-wrap justify-center gap-1.5">
+      <div className="flex flex-wrap justify-center gap-3">
         {uniqueCombos.map((band) => {
           const key = band.combo.join(",");
           const isSelected = key === selectedKey;
@@ -482,10 +482,17 @@ function ConflictPlayerCard({ entry }: { entry: RemainingPlayerAnalysis }) {
                 .map((l, i) => `${l.leagueName}: ${band.combo[i] ? "win" : "loss"}`)
                 .join(", ")}
               onClick={() => setSelectedKey((prev) => (prev === key ? null : key))}
-              className={`h-4 w-4 shrink-0 rounded-sm ring-offset-2 ring-offset-card transition-shadow outline-none ${
-                isSelected ? "ring-2 ring-foreground" : ""
-              }`}
-              style={{ backgroundColor: band.color }}
+              className="h-4 w-4 shrink-0 rounded-sm transition-shadow outline-none"
+              style={{
+                backgroundColor: band.color,
+                // Same shape as a Tailwind ring-offset-2 + ring-2, but the
+                // ring itself is this swatch's own color instead of a fixed
+                // foreground white — a 2px card-colored gap, then a 2px
+                // ring in band.color.
+                boxShadow: isSelected
+                  ? `0 0 0 2px var(--color-card), 0 0 0 4px ${band.color}`
+                  : undefined,
+              }}
             />
           );
         })}

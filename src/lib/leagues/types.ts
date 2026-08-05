@@ -1,3 +1,5 @@
+import type { GameStatus } from "./nfl-schedule";
+
 export interface LeagueTeamPlayer {
   id: string;
   name: string;
@@ -15,6 +17,16 @@ export interface LeagueTeamPlayer {
   projectedPoints?: number;
   /** True/false when the platform exposes experience data (currently Sleeper only); undefined = unknown. */
   isRookie?: boolean;
+  /**
+   * Explicit override of whether this player's game is pre/in/post — set by
+   * hand in the demo editor so a demo scenario can be constructed directly
+   * (e.g. "has points but game still in progress", or "zero points but
+   * done playing") instead of only ever being inferred from the zero-points
+   * proxy. Undefined means no override; real platforms never set this —
+   * they're inferred from the live NFL schedule instead (see
+   * isRemaining/isNotYetStarted in cross-league.ts).
+   */
+  gameStatus?: GameStatus;
 }
 
 export interface LeagueTeam {

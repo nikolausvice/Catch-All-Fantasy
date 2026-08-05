@@ -15,6 +15,13 @@
       "when": 1785792949362,
       "tag": "0001_glorious_retro_girl",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1785960963708,
+      "tag": "0002_spotty_colossus",
+      "breakpoints": true
     }
   ]
 }

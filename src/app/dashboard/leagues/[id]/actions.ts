@@ -5,9 +5,11 @@ import { revalidatePath } from "next/cache";
 import { auth } from "@/auth";
 import { db } from "@/db/client";
 import { connectedLeagues } from "@/db/schema";
+import type { GameStatus } from "@/lib/leagues/nfl-schedule";
 import {
   clearAllScoreOverrides,
   clearScoreOverride,
+  setGameStatusOverride,
   setScoreOverride,
 } from "@/lib/leagues/score-overrides";
 
@@ -65,6 +67,36 @@ export async function updateDemoScores(
     await setScoreOverride(session.user.id, u.name, u.position, u.points);
   }
 
+  revalidatePath("/dashboard", "layout");
+}
+
+/**
+ * Sets (or clears, with null) a player's explicit "is this player still
+ * actively playing" flag from the demo editor — independent of their score,
+ * so a scenario like "has points but still in progress" or "zero points but
+ * done playing" can be constructed directly instead of only ever inferred
+ * from the zero-points proxy. Same broadcast-by-identity behavior as
+ * updateDemoScores: it reaches this real-world player everywhere they're
+ * rostered, demo or real.
+ */
+export async function updateDemoGameStatus(
+  leagueRowId: string,
+  name: string,
+  position: string | null,
+  gameStatus: GameStatus | null,
+) {
+  const session = await auth();
+  if (!session?.user) throw new Error("You must be logged in.");
+
+  const league = await db.query.connectedLeagues.findFirst({
+    where: and(
+      eq(connectedLeagues.id, leagueRowId),
+      eq(connectedLeagues.userId, session.user.id),
+    ),
+  });
+  if (!league || league.platform !== "demo") return;
+
+  await setGameStatusOverride(session.user.id, name, position, gameStatus);
   revalidatePath("/dashboard", "layout");
 }
 

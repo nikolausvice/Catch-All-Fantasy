@@ -5,7 +5,7 @@ import { tryDecryptSecret } from "@/lib/crypto/secrets";
 import { EspnApiError } from "@/lib/espn/client";
 import { getCachedEspnTeamMatchup, getCachedSleeperTeamMatchup } from "@/lib/leagues/cache";
 import { computeDemoMatchup } from "@/lib/leagues/demo";
-import { applyScoreOverrides } from "@/lib/leagues/score-overrides";
+import { applyScoreOverrides, type PlayerOverride } from "@/lib/leagues/score-overrides";
 import { SleeperApiError } from "@/lib/sleeper/client";
 import type { LeagueMatchup } from "@/lib/leagues/types";
 
@@ -15,7 +15,7 @@ export async function loadMatchup(
   league: LeagueRow,
   userId: string,
   week: number,
-  scoreOverrides: Map<string, number>,
+  scoreOverrides: Map<string, PlayerOverride>,
 ): Promise<{ matchup: LeagueMatchup | null; error: string | null }> {
   try {
     if (league.platform === "demo") {
