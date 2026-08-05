@@ -1,13 +1,13 @@
 import type { CrossLeagueAnalysis, RemainingPlayerAnalysis } from "@/lib/leagues/cross-league";
 
 /**
- * Three flat, solid states — losing (red), split (orange), winning (green).
- * No blending between them: a continuous gradient reads a "51% toward green"
- * band as barely different from a "90% toward green" one, and a blended
- * midpoint (this used to shade continuously through the win/loss colors,
- * before that through amber) never lands on a clean, nameable color. Each
- * of the three is its own flat, fully-saturated stop (--color-outcome-*,
- * shared with outcome-landscape-section.tsx, themed in globals.css).
+ * Three flat, solid states — losing (red), split (amber), winning (green) —
+ * no blending between them: a continuous gradient reads a "51% toward
+ * green" band as barely different from a "90% toward green" one, and a
+ * blended midpoint never lands on a clean, nameable color. Same red/amber/
+ * emerald hues as the Players tab's own/opponent/mix coloring
+ * (--color-outcome-*, shared with outcome-landscape-section.tsx, themed in
+ * globals.css), so a color means the same thing everywhere in the app.
  */
 function bandColor(wins: number, total: number): string {
   const frac = total > 0 ? wins / total : 0.5;
@@ -34,7 +34,7 @@ function roundToWholePercentages(fractions: number[]): number[] {
 }
 
 /** Horizontal bar chart of P(exactly k wins) for k = 0..N — the shape of the whole week's outcome.
- * Colored on the same red/orange/green scale as the outcome line below, so 0 wins and N wins read
+ * Colored on the same red/amber/green scale as the outcome line below, so 0 wins and N wins read
  * the same way here as they do there. */
 function WinDistribution({ distribution }: { distribution: number[] }) {
   const total = distribution.length - 1;
@@ -106,6 +106,31 @@ function ConflictPlayerCard({ entry }: { entry: RemainingPlayerAnalysis }) {
     ((Math.min(Math.max(x, domainMin), domainMax) - domainMin) / span) * 100;
   const isLive = entry.currentPoints > 0;
 
+  // Resolved leagues are excluded — their threshold is retrospective, not
+  // part of this "what should they do from here" axis, and with
+  // computePlayerDomain also excluding them, plotting one here would sit
+  // right at (or past) the domain edge, disconnected from the colored line.
+  //
+  // leftX/rightX are pre-clamped to the visible 0–100 range, and centerX is
+  // the midpoint of THOSE clamped edges rather than of the raw (unclamped)
+  // threshold — a box whose left edge got clamped to 0 is no longer centered
+  // on the raw value, so the "~" label needs to follow the box it's actually
+  // labeling, not the point that box was originally centered on.
+  const dividers = entry.leagues
+    .filter((l) => l.breakEvenPoints != null && !l.resolved)
+    .map((l) => {
+      const x = pct(l.breakEvenPoints!);
+      // Uncertainty as width instead of a percentage: each OTHER
+      // still-unfinished starter (either side) is one more independent
+      // source of variance that could move this threshold, so the box
+      // widens — a lone remaining starter (remainingOthers = 0) collapses
+      // to zero width, drawn as a single bar instead of a box.
+      const halfWidth = l.isExact ? 0 : 6 * (l.remainingOthers / (1 + l.remainingOthers));
+      const leftX = Math.max(0, x - halfWidth);
+      const rightX = Math.min(100, x + halfWidth);
+      return { league: l, leftX, rightX, centerX: (leftX + rightX) / 2 };
+    });
+
   return (
     <div className="flex flex-col gap-2 rounded-xl border border-border bg-card p-4">
       <div className="flex flex-col items-center gap-1 text-center">
@@ -132,7 +157,7 @@ function ConflictPlayerCard({ entry }: { entry: RemainingPlayerAnalysis }) {
           preserveAspectRatio="none"
           className="h-full w-full overflow-visible"
           role="img"
-          aria-label={`${entry.name}'s record across ${total} leagues as a function of their points, currently at ${entry.currentPoints.toFixed(1)}. Green is a winning record, red losing, orange split. Each divider's confidence percentage reflects how many other unfinished starters could still move that threshold — 100% means this player is the last one left.`}
+          aria-label={`${entry.name}'s record across ${total} leagues as a function of their points, currently at ${entry.currentPoints.toFixed(1)}. Green is a winning record, red losing, amber split. Each threshold is drawn as a box that widens the more other unfinished starters could still move it, collapsing to a single line when this player is the last one left.`}
         >
           {entry.recordBands.map((band, i) => (
             <line
@@ -145,27 +170,32 @@ function ConflictPlayerCard({ entry }: { entry: RemainingPlayerAnalysis }) {
               strokeWidth={1.2}
             />
           ))}
-          {entry.leagues
-            // A resolved league's threshold is retrospective, not part of
-            // this "what should they do from here" axis — and with
-            // computePlayerDomain now excluding it too, plotting it here
-            // would sit right at (or past) the domain edge, disconnected
-            // from the colored line.
-            .filter((l) => l.breakEvenPoints != null && !l.resolved)
-            .map((l) => {
-              const x = pct(l.breakEvenPoints!);
-              return (
-                <line
-                  key={l.leagueId}
-                  x1={x}
-                  y1={0}
-                  x2={x}
-                  y2={10}
-                  stroke="white"
-                  strokeWidth={0.5}
-                />
-              );
-            })}
+          {dividers.map(({ league: l, leftX, rightX }) =>
+            // Exact (this player is the last one left in that league) — a
+            // single bar, no box.
+            l.isExact ? (
+              <line
+                key={l.leagueId}
+                x1={leftX}
+                y1={0}
+                x2={leftX}
+                y2={10}
+                stroke="white"
+                strokeWidth={0.5}
+              />
+            ) : (
+              <rect
+                key={l.leagueId}
+                x={leftX}
+                y={0.5}
+                width={rightX - leftX}
+                height={9}
+                fill="none"
+                stroke="white"
+                strokeWidth={0.5}
+              />
+            ),
+          )}
         </svg>
         {/* Rendered as an HTML circle, not an SVG one, because the svg above
             is non-uniformly scaled (preserveAspectRatio="none" on a 100x10
@@ -183,28 +213,26 @@ function ConflictPlayerCard({ entry }: { entry: RemainingPlayerAnalysis }) {
           />
         )}
       </div>
-      <div className="relative h-7 w-full">
-        {entry.leagues
-          .filter((l) => l.breakEvenPoints != null && !l.resolved)
-          .map((l) => {
-            // How many OTHER unfinished starters (either side) could still
-            // move this threshold, turned into a confidence percentage —
-            // 100% when this player is the only one left to play in that
-            // league, halving each time one more still-live starter is
-            // added, since each one is an independent extra source of
-            // variance that could swing it.
-            const confidencePct = Math.round(100 / (1 + l.remainingOthers));
-            return (
-              <span
-                key={l.leagueId}
-                className="absolute -translate-x-1/2 whitespace-nowrap text-center text-[10px] leading-tight text-foreground"
-                style={{ left: `${pct(l.breakEvenPoints!)}%` }}
-              >
-                <span className="block font-medium">{Math.round(l.breakEvenPoints!)}</span>
-                <span className="block text-muted-foreground">{confidencePct}%</span>
-              </span>
-            );
-          })}
+      <div className="relative h-4 w-full">
+        {dividers.map(({ league: l, centerX }) => (
+          <span
+            key={l.leagueId}
+            // Sign carries the meaning here (needs more vs. already
+            // covered), so it's colored instead of prefixed with a "~" —
+            // that symbol read as too easily confused with the minus sign
+            // on a negative number.
+            className={`absolute -translate-x-1/2 whitespace-nowrap text-[10px] font-medium leading-none ${
+              l.breakEvenPoints! < 0
+                ? "text-red-600 dark:text-red-400"
+                : "text-emerald-600 dark:text-emerald-400"
+            }`}
+            // Centered on the box's own (possibly edge-clamped) midpoint,
+            // not the raw threshold — see the dividers comment above.
+            style={{ left: `${centerX}%` }}
+          >
+            {Math.round(l.breakEvenPoints!)}
+          </span>
+        ))}
       </div>
     </div>
   );
