@@ -32,9 +32,9 @@ export function AddLeagueButton({ hasStoredEspnCookies }: { hasStoredEspnCookies
             dialogRef.current?.close();
           }
         }}
-        className="m-auto w-full max-w-lg rounded-xl border border-border bg-card p-0 text-foreground backdrop:bg-black/50"
+        className="m-auto flex max-h-[85dvh] w-[calc(100%-2rem)] max-w-lg flex-col overflow-hidden rounded-xl border border-border bg-card p-0 text-foreground backdrop:bg-black/50"
       >
-        <div className="flex items-center justify-between border-b border-border px-4 py-3">
+        <div className="flex shrink-0 items-center justify-between border-b border-border px-4 py-3">
           <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
             Add another league
           </h2>
@@ -47,7 +47,7 @@ export function AddLeagueButton({ hasStoredEspnCookies }: { hasStoredEspnCookies
             ✕
           </button>
         </div>
-        <div className="max-h-[70vh] overflow-y-auto p-4">
+        <div className="overflow-y-auto p-4">
           <AddLeagueSection hasStoredEspnCookies={hasStoredEspnCookies} />
         </div>
       </dialog>

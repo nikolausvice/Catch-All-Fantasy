@@ -70,6 +70,17 @@ body {
   padding-bottom: env(safe-area-inset-bottom);
 }
 
+/* iOS Safari auto-zooms the page on focus for any input under 16px — this doesn't
+   change the visual size of our text-sm inputs on larger screens, just guarantees
+   16px on the mobile widths where that zoom actually triggers. */
+@media (max-width: 640px) {
+  input,
+  select,
+  textarea {
+    font-size: 16px;
+  }
+}
+
 /* Chrome/Safari paint autofilled inputs with their own opaque (usually white) background,
    ignoring the page's — the long transition delay is the standard trick to stop that paint
    from ever showing before we override it with an inset box-shadow of our own card color. */
