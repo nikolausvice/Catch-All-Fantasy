@@ -20,10 +20,11 @@
   /* Same red/amber/emerald hues as the Players tab's own/opponent/mix
      coloring (venn-diagram.tsx's SIDE_TEXT_CLASS: emerald-600/amber-600/
      red-600 light, emerald-400/amber-400/red-400 dark), so a color means
-     the same thing everywhere in the app. */
+     the same thing everywhere in the app. Loss is the one exception,
+     matched to a specific reference red rather than red-600/red-400. */
   --outcome-win: #059669;
   --outcome-mid: #d97706;
-  --outcome-loss: #dc2626;
+  --outcome-loss: #ef4444;
 }
 
 .dark {
@@ -41,10 +42,10 @@
   --destructive: oklch(0.65 0.2 25);
   --destructive-foreground: oklch(0.15 0.01 25);
   --ring: oklch(0.72 0.15 165);
-  /* See the light-mode comment. */
+  /* See the light-mode comment — same reference red in both modes. */
   --outcome-win: #34d399;
   --outcome-mid: #fbbf24;
-  --outcome-loss: #f87171;
+  --outcome-loss: #ef4444;
 }
 
 @theme inline {

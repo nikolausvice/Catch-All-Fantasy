@@ -301,16 +301,20 @@ function ConflictPlayerCard({ entry }: { entry: RemainingPlayerAnalysis }) {
             // have it fighting the border's red/green for the same two
             // colors, so a green-text/red-border (or vice versa) badge read
             // as contradictory instead of as two separate facts.
-            const borderClass = !selectedCombo
-              ? "border-border"
+            // Same CSS vars as the chart/legend (not a separate Tailwind
+            // class) so this can never drift out of sync with whatever
+            // win/loss color those are set to.
+            const borderColor = !selectedCombo
+              ? "var(--color-border)"
               : selectedCombo[i]
-              ? "border-emerald-600 dark:border-emerald-400"
-              : "border-red-600 dark:border-red-400";
+              ? "var(--color-outcome-win)"
+              : "var(--color-outcome-loss)";
             return (
               <span
                 key={l.leagueId}
                 title={l.description}
-                className={`inline-flex items-center gap-0.5 rounded-full border px-1.5 py-0.5 text-[10px] font-semibold text-foreground transition-colors ${borderClass}`}
+                className="inline-flex items-center gap-0.5 rounded-full border px-1.5 py-0.5 text-[10px] font-semibold text-foreground transition-colors"
+                style={{ borderColor }}
               >
                 <span aria-hidden="true">{l.role === "your-starter" ? "↑" : "↓"}</span>
                 {l.leagueName}
@@ -442,18 +446,16 @@ function ConflictPlayerCard({ entry }: { entry: RemainingPlayerAnalysis }) {
           return (
             <span
               key={`label-${d.key}`}
-              // Sign carries the meaning here (needs more vs. already
-              // covered), so it's colored instead of prefixed with a "~" —
-              // that symbol read as too easily confused with the minus sign
-              // on a negative number.
-              className={`absolute -translate-x-1/2 whitespace-nowrap text-[10px] font-medium leading-none ${
-                displayValue < 0
-                  ? "text-red-600 dark:text-red-400"
-                  : "text-emerald-600 dark:text-emerald-400"
-              }`}
-              // Centered on the box's own (possibly edge-clamped) midpoint,
-              // not the raw threshold — see the dividers comment above.
-              style={{ left: `${d.centerX}%` }}
+              // Only the "already covered" (negative) case gets colored —
+              // same red as everywhere else (--color-outcome-loss). A
+              // normal, still-actionable positive threshold is plain white,
+              // not green; it's not calling out a good/bad outcome, just a
+              // number.
+              className="absolute -translate-x-1/2 whitespace-nowrap text-[10px] font-medium leading-none text-white"
+              style={{
+                left: `${d.centerX}%`,
+                color: displayValue < 0 ? "var(--color-outcome-loss)" : undefined,
+              }}
             >
               {displayValue}
             </span>
