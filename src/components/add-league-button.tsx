@@ -32,7 +32,7 @@ export function AddLeagueButton({ hasStoredEspnCookies }: { hasStoredEspnCookies
             dialogRef.current?.close();
           }
         }}
-        className="m-auto hidden max-h-[85dvh] w-[calc(100%-2rem)] max-w-lg flex-col overflow-hidden rounded-xl border border-border bg-card p-0 text-foreground open:flex backdrop:bg-black/50"
+        className="fixed inset-0 z-50 m-auto hidden max-h-[85dvh] w-[calc(100%-2rem)] max-w-lg flex-col overflow-hidden rounded-xl border border-border bg-card p-0 text-foreground open:flex backdrop:bg-black/50"
       >
         <div className="flex shrink-0 items-center justify-between border-b border-border px-4 py-3">
           <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
@@ -42,7 +42,7 @@ export function AddLeagueButton({ hasStoredEspnCookies }: { hasStoredEspnCookies
             type="button"
             onClick={() => dialogRef.current?.close()}
             aria-label="Close"
-            className="rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+            className="rounded-md p-1 text-muted-foreground outline-none ring-ring hover:bg-muted hover:text-foreground focus-visible:ring-2"
           >
             ✕
           </button>
