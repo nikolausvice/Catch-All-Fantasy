@@ -2,12 +2,12 @@ import type { OutcomeLandscape, PlayerOutcomeLandscape } from "@/lib/leagues/out
 
 // SVG viewBox height (user units). Width is 0–100, standing in for % of the
 // player's own points axis.
-const CHART_H = 60;
+const CHART_H = 10;
+const LINE_Y = CHART_H / 2;
 
-// Max blur applied to the whole streamgraph when a player is least locked
-// in overall — fades to 0 as confidence -> 1, layering a second, coarser
-// cue for uncertainty on top of the band-spread itself.
-const MAX_BLUR = 1.4;
+// A boundary below this certainty is drawn dotted rather than solid — exactly
+// 1 only when no other unresolved players anywhere could still shift it.
+const SOLID_CERTAINTY_THRESHOLD = 0.999;
 
 /**
  * Wins → red (bad) / orange (split) / green (good), centered on orange
@@ -25,62 +25,28 @@ function bandColor(wins: number, total: number): string {
   return `color-mix(in oklch, var(--color-outcome-loss) ${lossPct}%, var(--color-outcome-mid))`;
 }
 
-/** Representative projection (avg across the player's leagues) used only to translate the calculation's internal 0–axisMax ratio into a points scale for display. */
-function averageProjection(player: PlayerOutcomeLandscape): number {
-  if (player.leagues.length === 0) return 0;
-  const total = player.leagues.reduce((sum, l) => sum + l.projectedPoints, 0);
-  return total / player.leagues.length;
+/**
+ * Every league has its own projection for this player (different provider/
+ * scoring settings), so a single averaged points axis mislabels the real
+ * threshold in any specific league. Instead, each boundary's ratio is
+ * converted back to points separately per league it affects — the same
+ * number already used to build `optimalRange`, just surfaced for every
+ * boundary instead of only the optimal spans.
+ */
+function pointsForLeague(r: number, league: { projectedPoints: number }): number {
+  return Math.round(r * league.projectedPoints);
 }
 
-/** Cardinal spline through the given points, as an SVG path fragment (no leading M) — turns the ~25 discrete grid samples into a flowing curve instead of a jagged polyline. */
-function smoothLine(points: { x: number; y: number }[]): string {
-  if (points.length < 2) return "";
-  const tension = 0.2;
-  let d = "";
-  for (let i = 0; i < points.length - 1; i++) {
-    const p0 = points[i - 1] ?? points[i];
-    const p1 = points[i];
-    const p2 = points[i + 1];
-    const p3 = points[i + 2] ?? p2;
-    const c1x = p1.x + ((p2.x - p0.x) / 6) * tension * 3;
-    const c1y = p1.y + ((p2.y - p0.y) / 6) * tension * 3;
-    const c2x = p2.x - ((p3.x - p1.x) / 6) * tension * 3;
-    const c2y = p2.y - ((p3.y - p1.y) / 6) * tension * 3;
-    d += `C${c1x.toFixed(2)},${c1y.toFixed(2)} ${c2x.toFixed(2)},${c2y.toFixed(2)} ${p2.x.toFixed(2)},${p2.y.toFixed(2)} `;
-  }
-  return d;
-}
-
-function PlayerStream({ player }: { player: PlayerOutcomeLandscape }) {
+function PlayerLine({ player }: { player: PlayerOutcomeLandscape }) {
   const totalMatchups = player.leagues.length;
-  const projection = averageProjection(player);
   const axisMax = player.axisRange.max;
-  const maxPts = Math.round(axisMax * projection);
-  const blurPx = (1 - player.confidence) * MAX_BLUR;
+  const currentPts = Math.round(player.currentPoints);
 
   const xFor = (r: number) => (r / axisMax) * 100;
-  // Real win count in ascending order (0 at bottom/red .. total at top/green),
-  // each sample's probability mass for that win count stacked cumulatively.
-  const levels = Array.from({ length: totalMatchups + 1 }, (_, k) => k);
-
-  const cumAt = (sampleIdx: number, upToLevel: number) => {
-    const dist = player.samples[sampleIdx].distribution;
-    let sum = 0;
-    for (let k = 0; k <= upToLevel; k++) sum += dist[k] ?? 0;
-    return sum;
-  };
-
-  const bandPath = (level: number) => {
-    const top = player.samples.map((s, i) => ({ x: xFor(s.r), y: CHART_H - cumAt(i, level) * CHART_H }));
-    const bottom = player.samples
-      .map((s, i) => ({ x: xFor(s.r), y: CHART_H - cumAt(i, level - 1) * CHART_H }))
-      .reverse();
-    const start = top[0];
-    return `M${start.x.toFixed(2)},${start.y.toFixed(2)} ${smoothLine(top)}L${bottom[0].x.toFixed(2)},${bottom[0].y.toFixed(2)} ${smoothLine(bottom)}Z`;
-  };
+  const dotX = xFor(player.currentR);
 
   return (
-    <div className="flex flex-col gap-3 rounded-xl border border-border bg-card p-4">
+    <div className="flex flex-col gap-2 rounded-xl border border-border bg-card p-4">
       <div className="min-w-0">
         <p className="truncate text-sm font-medium">{player.name}</p>
         <p className="text-xs text-muted-foreground">
@@ -92,21 +58,65 @@ function PlayerStream({ player }: { player: PlayerOutcomeLandscape }) {
       <svg
         viewBox={`0 0 100 ${CHART_H}`}
         preserveAspectRatio="none"
-        className="h-16 w-full overflow-visible"
+        className="h-6 w-full overflow-visible"
         role="img"
-        aria-label={`Probability of each final record for ${player.name}'s ${totalMatchups} leagues as points scored go from 0 to ${maxPts}; wavier, more mixed color means other unfinished players could still change the outcome, flat and solid means it's locked in.`}
+        aria-label={`${player.name}'s outcome margin across ${totalMatchups} leagues, currently at ${currentPts} points. Red means a losing record, green a winning one, orange a split. Dotted dividers mean other unfinished players could still move the threshold; solid dividers are locked in.`}
       >
-        <g style={{ filter: blurPx > 0.15 ? `blur(${blurPx}px)` : undefined }}>
-          {levels.map((level) => (
-            <path key={level} d={bandPath(level)} fill={bandColor(level, totalMatchups)} />
-          ))}
-        </g>
+        {player.regions.map((region, i) => (
+          <line
+            key={i}
+            x1={xFor(region.min)}
+            y1={LINE_Y}
+            x2={xFor(region.max ?? axisMax)}
+            y2={LINE_Y}
+            stroke={bandColor(region.wins, totalMatchups)}
+            strokeWidth={1.6}
+          />
+        ))}
+
+        {player.boundaries.map((boundary, i) => {
+          const x = xFor(boundary.at);
+          const solid = boundary.certainty >= SOLID_CERTAINTY_THRESHOLD;
+          return (
+            <line
+              key={i}
+              x1={x}
+              y1={0}
+              x2={x}
+              y2={CHART_H}
+              stroke="var(--color-foreground)"
+              strokeOpacity={0.45}
+              strokeWidth={0.5}
+              strokeDasharray={solid ? undefined : "0.8,1"}
+            />
+          );
+        })}
+
+        <circle
+          cx={dotX}
+          cy={LINE_Y}
+          r={1.6}
+          fill="var(--color-foreground)"
+          stroke="var(--color-card)"
+          strokeWidth={0.6}
+        />
       </svg>
 
-      <div className="flex justify-between text-[10px] text-muted-foreground">
-        <span>0 pts</span>
-        <span>{maxPts} pts</span>
-      </div>
+      {player.boundaries.length > 0 && (
+        <div className="flex flex-col gap-0.5 text-xs text-muted-foreground">
+          {player.boundaries.map((boundary, i) => (
+            <p key={i} className="truncate">
+              <span className="font-medium">{boundary.fromLabel}</span>
+              {" → "}
+              <span className="font-medium">{boundary.toLabel}</span>
+              {": "}
+              {player.leagues
+                .map((l) => `${l.leagueName} ${pointsForLeague(boundary.at, l)} pts`)
+                .join(" · ")}
+            </p>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -126,15 +136,14 @@ export function OutcomeLandscapeSection({ landscape }: { landscape: OutcomeLands
   return (
     <div className="flex flex-col gap-3">
       <p className="text-xs text-muted-foreground">
-        Players you own in one league who face you in another. Each band's
-        thickness is the odds of that record at that many points — green on
-        top is a winning record, red on the bottom is a losing one, orange
-        in between is a split. A clean flat stack means it&apos;s decided;
-        a mixed, wavy stack means other unfinished players could still tip
-        it either way.
+        Players you own in one league who face you in another. The line is
+        your record across the axis of points they could still score — green
+        is a winning record, red a losing one, orange a split. The dot marks
+        their current points; solid dividers are locked in, dotted ones could
+        still move if other unfinished players swing the outcome.
       </p>
       {players.map((player) => (
-        <PlayerStream key={player.playerId} player={player} />
+        <PlayerLine key={player.playerId} player={player} />
       ))}
     </div>
   );

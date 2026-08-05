@@ -1,14 +1,51 @@
 import type { CrossLeagueAnalysis, RemainingPlayerAnalysis } from "@/lib/leagues/cross-league";
 
-/** Horizontal bar chart of P(exactly k wins) for k = 0..N — the shape of the whole week's outcome. */
+/**
+ * Three flat, solid states — losing (red), split (orange), winning (green).
+ * No blending between them: a continuous gradient reads a "51% toward green"
+ * band as barely different from a "90% toward green" one, and a blended
+ * midpoint (this used to shade continuously through the win/loss colors,
+ * before that through amber) never lands on a clean, nameable color. Each
+ * of the three is its own flat, fully-saturated stop (--color-outcome-*,
+ * shared with outcome-landscape-section.tsx, themed in globals.css).
+ */
+function bandColor(wins: number, total: number): string {
+  const frac = total > 0 ? wins / total : 0.5;
+  if (frac === 0.5) return "var(--color-outcome-mid)";
+  return frac > 0.5 ? "var(--color-outcome-win)" : "var(--color-outcome-loss)";
+}
+
+/**
+ * Rounds fractions (summing to ~1) to whole percentages that always sum to
+ * exactly 100 — plain per-entry Math.round can land on 99 or 101 depending
+ * on how the fractional parts fall. Every entry gets its floor, then the
+ * entries with the largest dropped remainders each get +1 until the total
+ * reaches 100.
+ */
+function roundToWholePercentages(fractions: number[]): number[] {
+  const scaled = fractions.map((f) => f * 100);
+  const floors = scaled.map(Math.floor);
+  const shortfall = 100 - floors.reduce((a, b) => a + b, 0);
+  const remainders = scaled.map((v, i) => ({ i, remainder: v - floors[i] }));
+  remainders.sort((a, b) => b.remainder - a.remainder);
+  const result = [...floors];
+  for (let n = 0; n < shortfall; n++) result[remainders[n].i] += 1;
+  return result;
+}
+
+/** Horizontal bar chart of P(exactly k wins) for k = 0..N — the shape of the whole week's outcome.
+ * Colored on the same red/orange/green scale as the outcome line below, so 0 wins and N wins read
+ * the same way here as they do there. */
 function WinDistribution({ distribution }: { distribution: number[] }) {
+  const total = distribution.length - 1;
   const maxProb = Math.max(...distribution);
   const mostLikely = distribution.indexOf(maxProb);
+  const percentages = roundToWholePercentages(distribution);
 
   return (
     <div className="flex flex-col gap-2 rounded-xl border border-border bg-card p-4">
-      {distribution.map((p, k) => {
-        const pct = Math.round(p * 100);
+      {distribution.map((_, k) => {
+        const pct = percentages[k];
         const isBest = k === mostLikely;
         return (
           <div key={k} className="flex items-center gap-3">
@@ -17,10 +54,11 @@ function WinDistribution({ distribution }: { distribution: number[] }) {
             </span>
             <div className="relative h-2.5 flex-1 overflow-hidden rounded-full bg-muted">
               <div
-                className={`absolute inset-y-0 left-0 rounded-full transition-all ${
-                  isBest ? "bg-primary" : "bg-muted-foreground/40"
-                }`}
-                style={{ width: `${Math.max(pct, pct > 0 ? 2 : 0)}%` }}
+                className="absolute inset-y-0 left-0 rounded-full transition-all"
+                style={{
+                  width: `${Math.max(pct, pct > 0 ? 2 : 0)}%`,
+                  backgroundColor: bandColor(k, total),
+                }}
               />
             </div>
             <span
@@ -37,120 +75,42 @@ function WinDistribution({ distribution }: { distribution: number[] }) {
   );
 }
 
-type LeagueConflict = RemainingPlayerAnalysis["leagues"][number];
-
-/** Points of "give" on either side of a league's breakeven threshold, from how many OTHER
- * starters (besides this player) could still swing it — 0 remaining collapses this to a
- * single sharp point; each additional one still to play widens it, capped so one league with a
- * pile of remaining starters doesn't stretch the shared axis for every other row. */
-const WIDTH_PER_REMAINING = 5;
-const MAX_REMAINING_FOR_WIDTH = 6;
-function uncertaintyHalfWidth(remainingOthers: number): number {
-  return Math.min(remainingOthers, MAX_REMAINING_FOR_WIDTH) * (WIDTH_PER_REMAINING / 2);
-}
-
-/** Rounds a span up to a "clean" tick step (5/10/15/20/25/50/100) so the shared axis reads
- * like a real ruler instead of an arbitrary fraction. */
-function niceTickStep(span: number): number {
-  const candidates = [5, 10, 15, 20, 25, 50, 100];
-  return candidates.find((step) => span / step <= 8) ?? 100;
-}
-
-/** One shared axis for the whole table — every row's bars line up against the same points,
- * which is the only way a "consistent interval" reads as one ruler instead of N disconnected
- * mini-charts each making up its own scale. */
-function computeSharedDomain(players: RemainingPlayerAnalysis[]): {
-  min: number;
-  max: number;
-  step: number;
-} {
-  let min = 0;
-  let max = 10;
-  for (const p of players) {
-    for (const l of p.leagues) {
-      const center = l.breakEvenPoints ?? 0;
-      const half = uncertaintyHalfWidth(l.remainingOthers);
-      min = Math.min(min, center - half);
-      max = Math.max(max, center + half);
-    }
-    max = Math.max(max, p.projectedPoints * 1.1, p.currentPoints + 4);
-  }
-  const step = niceTickStep(max - min);
-  min = Math.floor(min / step) * step;
-  max = Math.ceil(max / step) * step;
-  return { min, max: max > min ? max : min + step, step };
-}
-
 /**
- * One league's contribution to a player's row, painted across the FULL shared axis (not just
- * its own threshold's neighborhood) so stacking several of these on the same row is what
- * produces the overlap: red/green everywhere, amber only in the zone the outcome genuinely
- * isn't decided yet. A wide amber zone (many other starters still to play) bleeds into — and
- * visually blends with — neighboring leagues' zones; a zero-width one (this player is the
- * last starter left anywhere that matters) is a single crisp cut between solid colors.
+ * Each card gets its own axis, scaled to that player's own thresholds — a player whose
+ * break-evens sit in the 0–10 range shouldn't be squeezed into a shared axis stretched by
+ * some other player's break-even out at 80.
+ *
+ * Built only from still-pending leagues' thresholds, same as computeRecordBands — a
+ * resolved league's breakEvenPoints is retrospective, not part of the live axis, and
+ * stretching the domain to fit it would open a gap between the domain edge and where
+ * the colored line (which also ignores resolved thresholds) actually starts.
  */
-function LeagueBarLayer({
-  league,
-  domainMin,
-  domainMax,
-}: {
-  league: LeagueConflict;
-  domainMin: number;
-  domainMax: number;
-}) {
-  const span = domainMax - domainMin;
-  const pct = (x: number) =>
-    ((Math.min(Math.max(x, domainMin), domainMax) - domainMin) / span) * 100;
-
-  const center = league.breakEvenPoints ?? 0;
-  const half = uncertaintyHalfWidth(league.remainingOthers);
-  const lowerPct = pct(center - half);
-  const upperPct = pct(center + half);
-  // "your-starter": low score loses (red), high score wins (green). "opp-starter": mirrored.
-  const winsHigh = league.role === "your-starter";
-
-  return (
-    <>
-      <div
-        className={`absolute inset-y-0 left-0 ${winsHigh ? "bg-red-500/40" : "bg-emerald-500/40"}`}
-        style={{ width: `${lowerPct}%` }}
-      />
-      {upperPct > lowerPct && (
-        <div
-          className="absolute inset-y-0 bg-amber-500/40"
-          style={{ left: `${lowerPct}%`, width: `${upperPct - lowerPct}%` }}
-        />
-      )}
-      <div
-        className={`absolute inset-y-0 right-0 ${winsHigh ? "bg-emerald-500/40" : "bg-red-500/40"}`}
-        style={{ left: `${upperPct}%` }}
-      />
-    </>
+function computePlayerDomain(entry: RemainingPlayerAnalysis): { min: number; max: number } {
+  const pending = entry.leagues.filter((l) => !l.resolved);
+  let min = 0;
+  for (const l of pending) min = Math.min(min, l.breakEvenPoints ?? 0);
+  const max = Math.max(
+    10,
+    ...pending.map((l) => l.breakEvenPoints ?? 0),
+    entry.projectedPoints * 1.1,
+    entry.currentPoints + 4,
   );
+  return { min, max: max > min ? max : min + 10 };
 }
 
-function ConflictPlayerRow({
-  entry,
-  domainMin,
-  domainMax,
-}: {
-  entry: RemainingPlayerAnalysis;
-  domainMin: number;
-  domainMax: number;
-}) {
+function ConflictPlayerCard({ entry }: { entry: RemainingPlayerAnalysis }) {
+  const { min: domainMin, max: domainMax } = computePlayerDomain(entry);
   const span = domainMax - domainMin;
+  const total = entry.leagues.length;
   const pct = (x: number) =>
     ((Math.min(Math.max(x, domainMin), domainMax) - domainMin) / span) * 100;
   const isLive = entry.currentPoints > 0;
 
   return (
-    <div className="flex items-center gap-3 border-t border-border py-2.5 first:border-t-0">
-      <div className="w-32 shrink-0 sm:w-44">
+    <div className="flex flex-col gap-2 rounded-xl border border-border bg-card p-4">
+      <div className="flex flex-col items-center gap-1 text-center">
         <p className="truncate text-sm font-medium">{entry.name}</p>
-        <p className="truncate text-[11px] text-muted-foreground">
-          {entry.position} · {entry.proTeam}
-        </p>
-        <div className="mt-1 flex flex-wrap gap-1">
+        <div className="flex flex-wrap justify-center gap-1">
           {entry.leagues.map((l) => (
             <span
               key={l.leagueId}
@@ -166,54 +126,85 @@ function ConflictPlayerRow({
           ))}
         </div>
       </div>
-      <div className="relative h-9 flex-1 overflow-hidden rounded-md bg-muted/30">
-        {entry.leagues.map((l) => (
-          <LeagueBarLayer key={l.leagueId} league={l} domainMin={domainMin} domainMax={domainMax} />
-        ))}
-        <div
-          className="absolute inset-y-0 border-l-2 border-dashed border-foreground/60"
-          style={{ left: `${pct(entry.projectedPoints)}%` }}
-          title={`Projected: ${entry.projectedPoints.toFixed(1)} pts`}
-        />
+      <div className="relative h-6 w-full">
+        <svg
+          viewBox="0 0 100 10"
+          preserveAspectRatio="none"
+          className="h-full w-full overflow-visible"
+          role="img"
+          aria-label={`${entry.name}'s record across ${total} leagues as a function of their points, currently at ${entry.currentPoints.toFixed(1)}. Green is a winning record, red losing, orange split. Each divider's confidence percentage reflects how many other unfinished starters could still move that threshold — 100% means this player is the last one left.`}
+        >
+          {entry.recordBands.map((band, i) => (
+            <line
+              key={i}
+              x1={pct(band.min)}
+              y1={5}
+              x2={pct(band.max ?? domainMax)}
+              y2={5}
+              stroke={bandColor(band.wins, total)}
+              strokeWidth={1.2}
+            />
+          ))}
+          {entry.leagues
+            // A resolved league's threshold is retrospective, not part of
+            // this "what should they do from here" axis — and with
+            // computePlayerDomain now excluding it too, plotting it here
+            // would sit right at (or past) the domain edge, disconnected
+            // from the colored line.
+            .filter((l) => l.breakEvenPoints != null && !l.resolved)
+            .map((l) => {
+              const x = pct(l.breakEvenPoints!);
+              return (
+                <line
+                  key={l.leagueId}
+                  x1={x}
+                  y1={0}
+                  x2={x}
+                  y2={10}
+                  stroke="white"
+                  strokeWidth={0.5}
+                />
+              );
+            })}
+        </svg>
+        {/* Rendered as an HTML circle, not an SVG one, because the svg above
+            is non-uniformly scaled (preserveAspectRatio="none" on a 100x10
+            viewBox stretched to fill a much wider-than-tall box) — a circle
+            drawn in that coordinate space comes out as a stretched ellipse
+            on any screen wider than it is tall. */}
         {isLive && (
           <div
-            className="absolute inset-y-0 w-0.5 bg-foreground"
-            style={{ left: `${pct(entry.currentPoints)}%` }}
-            title={`Live: ${entry.currentPoints.toFixed(1)} pts`}
+            className="absolute top-1/2 h-2 w-2 -translate-x-1/2 -translate-y-1/2 rounded-full border"
+            style={{
+              left: `${pct(entry.currentPoints)}%`,
+              backgroundColor: "var(--color-foreground)",
+              borderColor: "var(--color-card)",
+            }}
           />
         )}
       </div>
-    </div>
-  );
-}
-
-/** Table header's ruler — ticks at the same shared interval every row's bars line up against. */
-function SharedAxisHeader({
-  domainMin,
-  domainMax,
-  step,
-}: {
-  domainMin: number;
-  domainMax: number;
-  step: number;
-}) {
-  const ticks: number[] = [];
-  for (let t = domainMin; t <= domainMax; t += step) ticks.push(t);
-  const span = domainMax - domainMin;
-
-  return (
-    <div className="flex items-center gap-3 pb-1.5">
-      <div className="w-32 shrink-0 sm:w-44" />
-      <div className="relative h-4 flex-1">
-        {ticks.map((t) => (
-          <span
-            key={t}
-            className="absolute -translate-x-1/2 text-[10px] text-muted-foreground"
-            style={{ left: `${((t - domainMin) / span) * 100}%` }}
-          >
-            {t}
-          </span>
-        ))}
+      <div className="relative h-7 w-full">
+        {entry.leagues
+          .filter((l) => l.breakEvenPoints != null && !l.resolved)
+          .map((l) => {
+            // How many OTHER unfinished starters (either side) could still
+            // move this threshold, turned into a confidence percentage —
+            // 100% when this player is the only one left to play in that
+            // league, halving each time one more still-live starter is
+            // added, since each one is an independent extra source of
+            // variance that could swing it.
+            const confidencePct = Math.round(100 / (1 + l.remainingOthers));
+            return (
+              <span
+                key={l.leagueId}
+                className="absolute -translate-x-1/2 whitespace-nowrap text-center text-[10px] leading-tight text-foreground"
+                style={{ left: `${pct(l.breakEvenPoints!)}%` }}
+              >
+                <span className="block font-medium">{Math.round(l.breakEvenPoints!)}</span>
+                <span className="block text-muted-foreground">{confidencePct}%</span>
+              </span>
+            );
+          })}
       </div>
     </div>
   );
@@ -223,25 +214,11 @@ function ConflictPlayersTable({ players }: { players: RemainingPlayerAnalysis[] 
   const conflicted = players.filter((p) => p.hasConflict && p.leagues.length > 1);
   if (conflicted.length === 0) return null;
 
-  const { min, max, step } = computeSharedDomain(conflicted);
-
   return (
-    <div className="flex flex-col gap-2">
-      <p className="text-xs text-muted-foreground">
-        Players you&apos;re rostering on both sides — your starter in one league, an
-        opponent&apos;s starter in another. Red/green is the record if they land there; amber is
-        still undecided. The more of this week&apos;s other starters are left to play, the wider
-        that undecided zone is — it collapses to a sharp line once this player is the last one
-        left anywhere it matters.
-      </p>
-      <div className="overflow-x-auto">
-        <div className="min-w-[480px] rounded-xl border border-border bg-card p-3">
-          <SharedAxisHeader domainMin={min} domainMax={max} step={step} />
-          {conflicted.map((entry) => (
-            <ConflictPlayerRow key={entry.playerId} entry={entry} domainMin={min} domainMax={max} />
-          ))}
-        </div>
-      </div>
+    <div className="flex flex-col gap-3">
+      {conflicted.map((entry) => (
+        <ConflictPlayerCard key={entry.playerId} entry={entry} />
+      ))}
     </div>
   );
 }

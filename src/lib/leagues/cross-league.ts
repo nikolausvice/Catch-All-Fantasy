@@ -58,8 +58,13 @@ export interface CrossLeaguePlayer {
 }
 
 /**
- * A starter who hasn't played yet (proxy: points === 0 and projectedPoints > 0)
- * and appears in conflicting roles across leagues.
+ * A starter — whether still to play or already resolved this week — who
+ * appears in conflicting roles across leagues (your starter in one, an
+ * opponent's starter in another). Resolved players stay in the conflict
+ * view after their game ends (with a fixed, no-longer-actionable per-league
+ * breakdown) rather than disappearing the moment their status flips, since
+ * their conflict with a still-live league is exactly as real as it was
+ * before kickoff.
  */
 export interface RemainingPlayerAnalysis {
   playerId: string;
@@ -99,6 +104,15 @@ export interface RemainingPlayerAnalysis {
      * "estimate" to "final" the instant the very last one kicks off.
      */
     remainingOthers: number;
+    /**
+     * True once this player's own game has finished (or started, for the
+     * live-scoring case folded in below) in this league — their contribution
+     * here is their actual score, not a projection, and breakEvenPoints is
+     * retrospective ("what they needed") rather than actionable.
+     */
+    resolved: boolean;
+    /** Only meaningful when resolved: whether they actually cleared breakEvenPoints. null while still pending. */
+    resolvedWin: boolean | null;
   }[];
   /**
    * True when the player is your starter in some leagues but opponent's
@@ -255,9 +269,15 @@ function isRemaining(p: LeagueTeamPlayer, statusByTeam?: Map<string, GameStatus>
   if (statusByTeam) {
     const status = statusByTeam.get(normalizeTeamAbbrev(p.proTeam));
     if (status === "post") return false;
-    if (status === "pre" || status === "in") return (p.projectedPoints ?? 0) > 0;
+    // "pre"/"in" is a definitive answer on its own — the game hasn't
+    // finished, so the player's score isn't locked in yet, regardless of
+    // whether the platform happened to supply a nonzero projection for
+    // them. Gating on projectedPoints here would silently drop a genuinely
+    // remaining starter whenever a league's projection data is missing or
+    // zero (a data-availability quirk, not a real "already resolved" state).
+    if (status === "pre" || status === "in") return true;
     // No schedule entry — team is on a bye, or the lookup missed. Fall
-    // through to the proxy below.
+    // through to the proxy below, which has no definitive status to lean on.
   }
   return (p.points ?? 0) === 0 && (p.projectedPoints ?? 0) > 0;
 }
@@ -274,7 +294,9 @@ function isNotYetStarted(p: LeagueTeamPlayer, statusByTeam?: Map<string, GameSta
   if (statusByTeam) {
     const status = statusByTeam.get(normalizeTeamAbbrev(p.proTeam));
     if (status === "post" || status === "in") return false;
-    if (status === "pre") return (p.projectedPoints ?? 0) > 0;
+    // Definitive: the game hasn't kicked off, regardless of whether we have
+    // a nonzero projection for this player (see isRemaining above).
+    if (status === "pre") return true;
   }
   return (p.points ?? 0) === 0 && (p.projectedPoints ?? 0) > 0;
 }
@@ -283,29 +305,41 @@ function isNotYetStarted(p: LeagueTeamPlayer, statusByTeam?: Map<string, GameSta
  * Partitions a conflicted player's possible final score into bands and
  * reports the resulting win-loss record (across every league they affect)
  * in each — e.g. "0.0–12.4 pts → 0-2", "12.4–18.6 → 1-1", "18.6+ → 2-0".
- * Each "your" league contributes a "need >= x to win" threshold; each "opp"
- * league contributes a "need <= y to win" threshold. Sorting the union of
- * thresholds splits the score axis into segments with a constant win/loss
- * count; adjacent segments with an identical record are merged. Not floored
- * at 0 — see the sweet-spot comment above for why negative bands are real.
+ * Each still-pending "your" league contributes a "need >= x to win"
+ * threshold; each still-pending "opp" league contributes a "need <= y to
+ * win" threshold. Sorting the union of thresholds splits the score axis into
+ * segments with a constant win/loss count; adjacent segments with an
+ * identical record are merged. Not floored at 0 — see the sweet-spot comment
+ * above for why negative bands are real.
+ *
+ * Resolved leagues (this player's game already over) don't belong on that
+ * axis at all — their outcome is fixed, it doesn't change with a hypothetical
+ * score in some other, still-live league — so they're folded in as a
+ * constant win/loss baseline added to every band instead.
  */
 function computeRecordBands(
   yourLeagues: RemainingPlayerAnalysis["leagues"],
   oppLeagues: RemainingPlayerAnalysis["leagues"],
 ): { min: number; max: number | null; wins: number; losses: number }[] {
+  const pendingYour = yourLeagues.filter((l) => !l.resolved);
+  const pendingOpp = oppLeagues.filter((l) => !l.resolved);
+  const resolvedLeagues = [...yourLeagues, ...oppLeagues].filter((l) => l.resolved);
+  const fixedWins = resolvedLeagues.filter((l) => l.resolvedWin).length;
+  const fixedLosses = resolvedLeagues.length - fixedWins;
+
   const thresholds = new Set<number>([0]);
-  for (const l of yourLeagues) thresholds.add(l.breakEvenPoints ?? 0);
-  for (const l of oppLeagues) thresholds.add(l.breakEvenPoints ?? 0);
+  for (const l of pendingYour) thresholds.add(l.breakEvenPoints ?? 0);
+  for (const l of pendingOpp) thresholds.add(l.breakEvenPoints ?? 0);
   const points = [...thresholds].sort((a, b) => a - b);
 
   function outcomeAt(testScore: number): { wins: number; losses: number } {
-    let wins = 0;
-    let losses = 0;
-    for (const l of yourLeagues) {
+    let wins = fixedWins;
+    let losses = fixedLosses;
+    for (const l of pendingYour) {
       if (testScore >= (l.breakEvenPoints ?? 0)) wins++;
       else losses++;
     }
-    for (const l of oppLeagues) {
+    for (const l of pendingOpp) {
       if (testScore <= (l.breakEvenPoints ?? 0)) wins++;
       else losses++;
     }
@@ -332,11 +366,32 @@ function computeRecordBands(
   return merged;
 }
 
-/** Box-Muller standard normal sample. */
-function gaussianRandom(): number {
-  const u1 = Math.random() || Number.EPSILON;
-  const u2 = Math.random();
+/** Box-Muller standard normal sample, drawn from the given uniform RNG. */
+function gaussianRandom(rng: () => number): number {
+  const u1 = rng() || Number.EPSILON;
+  const u2 = rng();
   return Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
+}
+
+/** FNV-1a — cheap, deterministic string hash used to seed the simulation below. */
+function hashSeed(str: string): number {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < str.length; i++) {
+    h ^= str.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return h >>> 0;
+}
+
+/** mulberry32 — small, fast, deterministic PRNG from a 32-bit seed. */
+function mulberry32(seed: number): () => number {
+  let a = seed;
+  return () => {
+    a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
 }
 
 const SIM_TRIALS = 10000;
@@ -370,6 +425,12 @@ interface SimLeague {
  * as a remaining starter — your team in one league, an opponent's team in
  * another — so correlated/anti-correlated outcomes fall out naturally
  * instead of being assumed away.
+ *
+ * The RNG is seeded from the matchup data itself (scores + remaining
+ * players' projections), not the system clock, so the distribution is a
+ * pure function of the current state — identical on every refresh until
+ * something real changes (a score updates, a player's projection moves),
+ * rather than jittering randomly on every page load.
  */
 function simulateJointOutcomes(
   matchupResults: { leagueId: string; platform: string; matchup: LeagueMatchup | null }[],
@@ -377,6 +438,7 @@ function simulateJointOutcomes(
 ): { winCountDistribution: number[]; expectedWins: number; probAllWins: number } {
   const leagues: SimLeague[] = [];
   const players = new Map<string, { mean: number; sd: number }>();
+  const seedParts: string[] = [];
 
   function registerPlayer(p: LeagueTeamPlayer): string {
     const key = normalizePlayerKey(p.name, p.position);
@@ -388,21 +450,26 @@ function simulateJointOutcomes(
     return key;
   }
 
-  for (const { platform, matchup } of matchupResults) {
+  for (const { leagueId, platform, matchup } of matchupResults) {
     if (!matchup || !matchup.opponent) continue;
     // Demo leagues are hand-edited fake data — a real NFL team's live game
     // status shouldn't override the score the user actually typed in.
     const status = platform === "demo" ? undefined : statusByTeam;
+    const remainingMineKeys = matchup.team.players
+      .filter((p) => isNotYetStarted(p, status))
+      .map(registerPlayer);
+    const remainingOppKeys = matchup.opponent.players
+      .filter((p) => isNotYetStarted(p, status))
+      .map(registerPlayer);
     leagues.push({
       lockedMine: matchup.teamScore ?? 0,
       lockedOpp: matchup.opponentScore ?? 0,
-      remainingMineKeys: matchup.team.players
-        .filter((p) => isNotYetStarted(p, status))
-        .map(registerPlayer),
-      remainingOppKeys: matchup.opponent.players
-        .filter((p) => isNotYetStarted(p, status))
-        .map(registerPlayer),
+      remainingMineKeys,
+      remainingOppKeys,
     });
+    seedParts.push(
+      `${leagueId}:${matchup.teamScore}:${matchup.opponentScore}:${[...remainingMineKeys].sort().join(",")}:${[...remainingOppKeys].sort().join(",")}`,
+    );
   }
 
   if (leagues.length === 0) {
@@ -410,6 +477,13 @@ function simulateJointOutcomes(
   }
 
   const playerEntries = [...players.entries()];
+  seedParts.push(
+    ...playerEntries
+      .map(([key, { mean }]) => `${key}=${mean}`)
+      .sort(),
+  );
+  const rng = mulberry32(hashSeed(seedParts.sort().join("|")));
+
   const winCounts = new Array(leagues.length + 1).fill(0);
   let totalWins = 0;
   let sweepCount = 0;
@@ -417,15 +491,15 @@ function simulateJointOutcomes(
   for (let trial = 0; trial < SIM_TRIALS; trial++) {
     const draws = new Map<string, number>();
     for (const [key, { mean, sd }] of playerEntries) {
-      draws.set(key, Math.max(0, mean + gaussianRandom() * sd));
+      draws.set(key, Math.max(0, mean + gaussianRandom(rng) * sd));
     }
 
     let wins = 0;
     for (const league of leagues) {
       const mineExtra = league.remainingMineKeys.reduce((s, k) => s + (draws.get(k) ?? 0), 0);
       const oppExtra = league.remainingOppKeys.reduce((s, k) => s + (draws.get(k) ?? 0), 0);
-      const finalMine = league.lockedMine + mineExtra + gaussianRandom() * FLOOR_SD;
-      const finalOpp = league.lockedOpp + oppExtra + gaussianRandom() * FLOOR_SD;
+      const finalMine = league.lockedMine + mineExtra + gaussianRandom(rng) * FLOOR_SD;
+      const finalOpp = league.lockedOpp + oppExtra + gaussianRandom(rng) * FLOOR_SD;
       if (finalMine > finalOpp) wins++;
     }
 
@@ -579,12 +653,17 @@ export function analyzeCrossLeague(
     const myRemaining = matchup.team.players.filter((p) => isRemaining(p, status));
     const oppRemaining = matchup.opponent.players.filter((p) => isRemaining(p, status));
     remainingCountByLeague.set(leagueId, myRemaining.length + oppRemaining.length);
+    // Computed from currentScore + each remaining starter's own projection
+    // (not the platform's aggregate teamProjectedScore/opponentProjectedScore)
+    // so that subtracting a specific remaining player's projection below
+    // — to get "final score without them" — is subtracting something that
+    // was actually included in the total. Demo leagues set their aggregate
+    // projected score equal to the current actual score (see demo.ts), which
+    // never includes remaining players at all; trusting that field here would
+    // silently double-discount the target player's own projection.
     leagueProjData.set(leagueId, {
-      myProj:
-        matchup.teamProjectedScore ??
-        (matchup.teamScore ?? 0) + myRemaining.reduce((s, p) => s + (p.projectedPoints ?? 0), 0),
+      myProj: (matchup.teamScore ?? 0) + myRemaining.reduce((s, p) => s + (p.projectedPoints ?? 0), 0),
       oppProj:
-        matchup.opponentProjectedScore ??
         (matchup.opponentScore ?? 0) + oppRemaining.reduce((s, p) => s + (p.projectedPoints ?? 0), 0),
     });
   }
@@ -598,19 +677,41 @@ export function analyzeCrossLeague(
     if (!proj) continue;
     const status = platform === "demo" ? undefined : statusByTeam;
 
-    // My remaining starters
+    // My starters — every starter, not just ones still to play. A player
+    // who's already locked in on one side but still pending (or also
+    // locked in, just for the other team) on another is exactly as much of
+    // a genuine conflict as a fully-pending one; excluding resolved
+    // players here used to silently drop them from the whole conflict view
+    // the moment their game ended, even though the OTHER league(s) they
+    // conflict with may still be live.
     for (const player of matchup.team.players) {
-      if (!isRemaining(player, status)) continue;
-      const pProj = player.projectedPoints!;
-      const key = playerKey(platform, player.id);
+      if (!player.isStarter) continue;
+      const resolved = !isRemaining(player, status);
+      // Whatever's actually baked into proj.myProj for this player: their
+      // locked actual score once resolved, their projection while pending.
+      const pContribution = resolved ? player.points ?? 0 : player.projectedPoints ?? 0;
+      // Same real-player identity as the rest of the app (roster-overlap.ts,
+      // outcome-landscape.ts) — not playerKey's platform+raw-id scheme, which
+      // deliberately keeps platforms separate and (for demo leagues, whose
+      // ids are hand-typed per roster) can't be trusted to be consistent for
+      // the same player across leagues anyway. Using it here would silently
+      // strand a newly-added team's copy of this player in its own entry
+      // instead of joining the existing conflict.
+      const key = normalizePlayerKey(player.name, player.position);
 
-      // My projected without this player
-      const myWithout = proj.myProj - pProj;
-      // To win: myWithout + p.actual > proj.oppProj
-      const breakEven = proj.oppProj - myWithout; // need >= this to win
+      // My projected (or, if resolved, actual) final without this player
+      const myWithout = proj.myProj - pContribution;
+      // To win: myWithout + p's score > proj.oppProj
+      const breakEven = proj.oppProj - myWithout; // needed >= this to win
       const winningWithout = myWithout > proj.oppProj;
 
-      const desc = winningWithout
+      const desc = resolved
+        ? winningWithout
+          ? `Won this league even without ${player.name}'s ${pContribution.toFixed(1)} pts`
+          : `Scored ${pContribution.toFixed(1)} pts — ${
+              pContribution >= breakEven ? "enough to" : "not enough to"
+            } secure the win`
+        : winningWithout
         ? `Projected to win even if ${player.name} scores 0`
         : breakEven > 0
         ? `${player.name} needs ~${breakEven.toFixed(1)} pts to secure the W`
@@ -623,7 +724,7 @@ export function analyzeCrossLeague(
           name: player.name,
           position: player.position,
           proTeam: player.proTeam,
-          projectedPoints: pProj,
+          projectedPoints: pContribution,
           currentPoints: player.points ?? 0,
           leagues: [],
           hasConflict: false,
@@ -634,7 +735,7 @@ export function analyzeCrossLeague(
         remainingByPlayer.set(key, entry);
       }
       // Update to highest projection/current-points seen
-      if (pProj > entry.projectedPoints) entry.projectedPoints = pProj;
+      if (pContribution > entry.projectedPoints) entry.projectedPoints = pContribution;
       if ((player.points ?? 0) > entry.currentPoints) entry.currentPoints = player.points ?? 0;
 
       entry.leagues.push({
@@ -644,27 +745,38 @@ export function analyzeCrossLeague(
         breakEvenPoints: breakEven,
         winningWithout,
         description: desc,
-        isExact: remainingCountByLeague.get(leagueId) === 1,
-        remainingOthers: (remainingCountByLeague.get(leagueId) ?? 1) - 1,
+        isExact: resolved || remainingCountByLeague.get(leagueId) === 1,
+        remainingOthers: resolved ? 0 : (remainingCountByLeague.get(leagueId) ?? 1) - 1,
+        resolved,
+        resolvedWin: resolved ? pContribution >= breakEven : null,
       });
     }
 
-    // Opponent's remaining starters
+    // Opponent's starters — see the comment above the "My starters" loop.
     if (matchup.opponent) {
       for (const player of matchup.opponent.players) {
-        if (!isRemaining(player, status)) continue;
-        const pProj = player.projectedPoints!;
-        const key = playerKey(platform, player.id);
+        if (!player.isStarter) continue;
+        const resolved = !isRemaining(player, status);
+        const pContribution = resolved ? player.points ?? 0 : player.projectedPoints ?? 0;
+        // See the matching comment above — same real-player identity as the
+        // rest of the app, not the platform+raw-id scheme.
+        const key = normalizePlayerKey(player.name, player.position);
 
-        // Opp projected without this player
-        const oppWithout = proj.oppProj - pProj;
-        // I win if: proj.myProj > oppWithout + p.actual
-        // i.e. p.actual < proj.myProj - oppWithout
+        // Opp projected (or, if resolved, actual) final without this player
+        const oppWithout = proj.oppProj - pContribution;
+        // I win if: proj.myProj > oppWithout + p's score
+        // i.e. p's score < proj.myProj - oppWithout
         const maxAllowed = proj.myProj - oppWithout;
         const winningWithout = proj.myProj > oppWithout;
 
-        const desc = winningWithout
-          ? `Winning even if ${player.name} scores their projection (${pProj.toFixed(1)} pts)`
+        const desc = resolved
+          ? winningWithout
+            ? `Won this league even though ${player.name} scored ${pContribution.toFixed(1)} pts`
+            : `${player.name} scored ${pContribution.toFixed(1)} pts — ${
+                pContribution <= maxAllowed ? "still" : "not"
+              } enough for you to win`
+          : winningWithout
+          ? `Winning even if ${player.name} scores their projection (${pContribution.toFixed(1)} pts)`
           : maxAllowed > 0
           ? `${player.name} must score under ${maxAllowed.toFixed(1)} pts for you to win`
           : `Opponent wins even if ${player.name} scores 0`;
@@ -676,7 +788,7 @@ export function analyzeCrossLeague(
             name: player.name,
             position: player.position,
             proTeam: player.proTeam,
-            projectedPoints: pProj,
+            projectedPoints: pContribution,
             currentPoints: player.points ?? 0,
             leagues: [],
             hasConflict: false,
@@ -686,7 +798,7 @@ export function analyzeCrossLeague(
           };
           remainingByPlayer.set(key, entry);
         }
-        if (pProj > entry.projectedPoints) entry.projectedPoints = pProj;
+        if (pContribution > entry.projectedPoints) entry.projectedPoints = pContribution;
         if ((player.points ?? 0) > entry.currentPoints) entry.currentPoints = player.points ?? 0;
 
         entry.leagues.push({
@@ -696,8 +808,10 @@ export function analyzeCrossLeague(
           breakEvenPoints: maxAllowed,
           winningWithout,
           description: desc,
-          isExact: remainingCountByLeague.get(leagueId) === 1,
-          remainingOthers: (remainingCountByLeague.get(leagueId) ?? 1) - 1,
+          isExact: resolved || remainingCountByLeague.get(leagueId) === 1,
+          remainingOthers: resolved ? 0 : (remainingCountByLeague.get(leagueId) ?? 1) - 1,
+          resolved,
+          resolvedWin: resolved ? pContribution <= maxAllowed : null,
         });
       }
     }
@@ -711,19 +825,37 @@ export function analyzeCrossLeague(
     if (yourLeagues.length > 0 && oppLeagues.length > 0) {
       entry.hasConflict = true;
 
-      // Sweet spot: [max of all your minimums, min of all opp maximums].
-      // Not floored at 0 — a genuinely negative threshold ("you're covered
-      // even if they bomb") is real information, not noise.
-      const minNeeded = Math.max(...yourLeagues.map((l) => l.breakEvenPoints ?? 0));
-      const maxAllowed = Math.min(
-        entry.projectedPoints * 2, // generous upper cap
-        ...oppLeagues.map((l) => l.breakEvenPoints ?? entry.projectedPoints * 2),
-      );
+      // Sweet spot is actionable guidance ("what should this player do from
+      // here"), so it's built only from leagues still actually pending —
+      // a resolved league has nothing left to root for, and folding its
+      // fixed breakEvenPoints into the min/max here would distort the range
+      // with a threshold that can no longer be influenced.
+      const pendingYourLeagues = yourLeagues.filter((l) => !l.resolved);
+      const pendingOppLeagues = oppLeagues.filter((l) => !l.resolved);
 
-      entry.sweetSpot =
-        minNeeded <= maxAllowed ? { min: minNeeded, max: maxAllowed } : null;
-      entry.sweetSpotIsExact =
-        yourLeagues.every((l) => l.isExact) && oppLeagues.every((l) => l.isExact);
+      if (pendingYourLeagues.length === 0 && pendingOppLeagues.length === 0) {
+        // Everything relevant to this player already happened.
+        entry.sweetSpot = null;
+        entry.sweetSpotIsExact = false;
+      } else {
+        // Not floored at 0 — a genuinely negative threshold ("you're covered
+        // even if they bomb") is real information, not noise.
+        const minNeeded =
+          pendingYourLeagues.length > 0
+            ? Math.max(...pendingYourLeagues.map((l) => l.breakEvenPoints ?? 0))
+            : 0;
+        // Generous upper cap either way — also stands in for "no ceiling"
+        // when every opp-side league here is already resolved, since
+        // sweetSpot.max isn't nullable.
+        const maxAllowed = Math.min(
+          entry.projectedPoints * 2,
+          ...pendingOppLeagues.map((l) => l.breakEvenPoints ?? entry.projectedPoints * 2),
+        );
+
+        entry.sweetSpot = minNeeded <= maxAllowed ? { min: minNeeded, max: maxAllowed } : null;
+        entry.sweetSpotIsExact =
+          pendingYourLeagues.every((l) => l.isExact) && pendingOppLeagues.every((l) => l.isExact);
+      }
       entry.recordBands = computeRecordBands(yourLeagues, oppLeagues);
     }
   }

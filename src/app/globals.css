@@ -18,7 +18,9 @@
   --destructive-foreground: oklch(0.98 0.01 25);
   --ring: oklch(0.55 0.16 165);
   --outcome-win: oklch(0.6 0.15 145);
-  --outcome-mid: oklch(0.75 0.15 55);
+  /* A flat, solid, fully-saturated orange — one of exactly three fixed
+     states (red/orange/green), not a midpoint blended from its neighbors. */
+  --outcome-mid: #f97316;
   --outcome-loss: oklch(0.58 0.22 25);
 }
 
@@ -38,7 +40,8 @@
   --destructive-foreground: oklch(0.15 0.01 25);
   --ring: oklch(0.72 0.15 165);
   --outcome-win: oklch(0.72 0.15 145);
-  --outcome-mid: oklch(0.78 0.14 55);
+  /* See the light-mode comment — same flat, solid orange. */
+  --outcome-mid: #f97316;
   --outcome-loss: oklch(0.65 0.2 25);
 }
 

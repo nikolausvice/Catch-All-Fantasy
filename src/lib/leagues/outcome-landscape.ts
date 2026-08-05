@@ -119,6 +119,10 @@ export interface PlayerOutcomeLandscape {
    */
   confidence: number;
   optimalRange: OptimalRange | null;
+  /** Player's current actual points, averaged across their leagues (in the same units as `leagues[].projectedPoints`). */
+  currentPoints: number;
+  /** `currentPoints` translated onto the normalized performance axis (same units as `samples[].r` / `regions[].min`/`max`). */
+  currentR: number;
 }
 
 export interface OutcomeLandscape {
@@ -159,7 +163,11 @@ function isNotYetStarted(p: LeagueTeamPlayer, statusByTeam?: Map<string, GameSta
   if (statusByTeam) {
     const status = statusByTeam.get(normalizeTeamAbbrev(p.proTeam));
     if (status === "post" || status === "in") return false;
-    if (status === "pre") return (p.projectedPoints ?? 0) > 0;
+    // Definitive: the game hasn't kicked off, regardless of whether we have
+    // a nonzero projection for this player — gating on projectedPoints here
+    // would silently drop a genuinely remaining starter whenever a league's
+    // projection data happens to be missing or zero.
+    if (status === "pre") return true;
     // No schedule entry (bye, or lookup miss) — fall through to the proxy below.
   }
   return (p.points ?? 0) === 0 && (p.projectedPoints ?? 0) > 0;
@@ -204,7 +212,13 @@ interface RemainingPlayerEntry {
   name: string;
   position: string | null;
   proTeam: string | null;
-  appearances: { leagueId: string; leagueName: string; role: PlayerRole; projectedPoints: number }[];
+  appearances: {
+    leagueId: string;
+    leagueName: string;
+    role: PlayerRole;
+    projectedPoints: number;
+    points: number;
+  }[];
 }
 
 function registerAppearance(
@@ -220,7 +234,13 @@ function registerAppearance(
     entry = { key, name: p.name, position: p.position, proTeam: p.proTeam, appearances: [] };
     map.set(key, entry);
   }
-  entry.appearances.push({ leagueId, leagueName, role, projectedPoints: p.projectedPoints ?? 0 });
+  entry.appearances.push({
+    leagueId,
+    leagueName,
+    role,
+    projectedPoints: p.projectedPoints ?? 0,
+    points: p.points ?? 0,
+  });
 }
 
 interface SimLeague {
@@ -470,6 +490,10 @@ function computePlayerLandscape(
     projectedPoints: a.projectedPoints,
   }));
 
+  const currentPoints = avg(target.appearances.map((a) => a.points));
+  const avgProjection = avg(target.appearances.map((a) => a.projectedPoints));
+  const currentR = avgProjection > 0 ? Math.min(opts.axisMax, Math.max(0, currentPoints / avgProjection)) : 0;
+
   return {
     playerId: target.key,
     name: target.name,
@@ -482,6 +506,8 @@ function computePlayerLandscape(
     boundaries,
     confidence,
     optimalRange,
+    currentPoints,
+    currentR,
   };
 }
 
