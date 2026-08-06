@@ -1,7 +1,20 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import Link from "next/link";
+import { useState } from "react";
 import type { CrossLeagueAnalysis, RemainingPlayerAnalysis } from "@/lib/leagues/cross-league";
+
+/**
+ * Eight basic colors, Outcomes-tab-only (WinDistribution/bandColor below
+ * keeps the generic red/green CSS vars — it's an aggregate across every
+ * league, not one player's own chart). Green/Red are the two outcomes that
+ * matter most (a clean win, a clean loss) and are also the pair most
+ * readers already associate with "good/bad," so they keep those roles; the
+ * other six become the mixed-combo palette in MIXED_COMBO_COLORS below —
+ * together that's the full set, none left over, none reused.
+ */
+const CARD_WIN_COLOR = "#22C55E"; // Green
+const CARD_LOSS_COLOR = "#EF4444"; // Red
 
 /**
  * Wins → red (bad) / green (good) — used only for the aggregate win-count
@@ -17,15 +30,30 @@ function bandColor(wins: number, total: number): string {
 
 /**
  * Fixed, ordered hues for a "mixed" combo (some leagues won, some lost) —
- * distinct from the reserved win/loss green/red so a mixed outcome is never
- * mistaken for a clean sweep or a clean shutout. Plain, saturated, easily-
- * named colors (Tailwind's 500 step) rather than muted design-system
- * pastels, so each one reads clearly at a glance: blue, purple, orange,
- * yellow, pink, cyan. Assigned in this order as new combos are first
- * encountered scanning left→right (see computeComboBands); never reused for
- * a different combo within one card, never cycled once past the end.
+ * distinct from CARD_WIN_COLOR/CARD_LOSS_COLOR so a mixed outcome is never
+ * mistaken for a clean sweep or a clean shutout. The remaining six of the
+ * eight basic colors, ordered to alternate warm/cool (and pair rough
+ * complements back-to-back — Blue/Orange, Purple/Yellow) so that whichever
+ * two of these end up adjacent on a card, they read as clearly different
+ * rather than two nearby shades of the same temperature. Light Blue sits
+ * apart from Blue for the same reason: a hue shift toward cyan plus a big
+ * jump in lightness, not just "a paler version of the same color." White is
+ * pulled in slightly off pure white (#F1F5F9) so it stays distinguishable
+ * from the chart's own always-white dot and box outline. Assigned in this
+ * order as new combos are first encountered scanning left→right (see
+ * computeComboBands); never reused for a different combo within one card. A
+ * 7th distinct mixed combo on the same card — rare, needs 3+ pending
+ * leagues splitting every possible way — cycles back to Blue rather than
+ * growing further.
  */
-const MIXED_COMBO_COLORS = ["#3b82f6", "#a855f7", "#f97316", "#eab308", "#ec4899", "#06b6d4"];
+const MIXED_COMBO_COLORS = [
+  "#3B82F6", // Blue
+  "#F97316", // Orange
+  "#A855F7", // Purple
+  "#EAB308", // Yellow
+  "#38BDF8", // Light Blue
+  "#F1F5F9", // White
+];
 
 /**
  * One color per DISTINCT combination of per-league win/loss for this
@@ -64,8 +92,8 @@ function computeComboBands(
     const key = combo.join(",");
     let color = colorForCombo.get(key);
     if (!color) {
-      if (combo.every(Boolean)) color = "var(--color-outcome-win)";
-      else if (combo.every((w) => !w)) color = "var(--color-outcome-loss)";
+      if (combo.every(Boolean)) color = CARD_WIN_COLOR;
+      else if (combo.every((w) => !w)) color = CARD_LOSS_COLOR;
       else {
         color = MIXED_COMBO_COLORS[nextMixedColor % MIXED_COMBO_COLORS.length];
         nextMixedColor++;
@@ -91,15 +119,7 @@ function isDefensePosition(position: string | null): boolean {
   return p === "DST" || p === "DEF" || p === "D/ST";
 }
 
-/** The score chip's own border reports playing status, not outcome — see
- * the matching comment in globals.css for why these are deliberately
- * neutral instead of drawn from the win/mid/loss palette. */
-function statusBorderColor(status: "pre" | "in" | "post"): string {
-  if (status === "pre") return "var(--color-status-pre)";
-  if (status === "in") return "var(--color-status-live)";
-  return "var(--color-status-post)";
-}
-
+/** Hover text on the score chip — "Yet to play"/"Live"/"Final". */
 function statusLabel(status: "pre" | "in" | "post"): string {
   if (status === "pre") return "Yet to play";
   if (status === "in") return "Live";
@@ -367,15 +387,13 @@ function PlayerOutcomeCard({ entry }: { entry: RemainingPlayerAnalysis }) {
     <div className="flex flex-col gap-2 rounded-xl bg-card p-4">
       <p className="truncate text-center text-sm font-medium">{entry.name}</p>
       {/* Current score, averaged across leagues already (entry.currentPoints).
-          Plain chip, not colored by outcome — the border is playing status
-          instead, and this chip is now the only place status shows at all,
-          since the card itself no longer carries a status border. A row of
-          its own (not an overlay on the dot) is also what buys the
-          breathing room between the name and the chart. */}
+          Plain chip, not colored by outcome — a white border, same as the
+          dot/box-outline elsewhere on this card. A row of its own (not an
+          overlay on the dot) is also what buys the breathing room between
+          the name and the chart. */}
       <div className="flex justify-center">
         <span
-          className="inline-flex items-center rounded-full border-2 px-2 py-0.5 text-xs font-bold text-foreground"
-          style={{ borderColor: statusBorderColor(entry.status) }}
+          className="inline-flex items-center rounded-full border-2 border-white px-2 py-0.5 text-xs font-bold text-foreground"
           title={statusLabel(entry.status)}
         >
           {Math.round(entry.currentPoints)}
@@ -510,14 +528,14 @@ function PlayerOutcomeCard({ entry }: { entry: RemainingPlayerAnalysis }) {
               <span
                 key={`label-${d.key}`}
                 // Only the "already covered" (negative) case gets colored —
-                // same red as everywhere else (--color-outcome-loss). A
+                // same CARD_LOSS_COLOR as everywhere else on this page. A
                 // normal, still-actionable positive threshold is plain
-                // white, not green; it's not calling out a good/bad
+                // white, not the win color; it's not calling out a good/bad
                 // outcome, just a number.
                 className="absolute -translate-x-1/2 whitespace-nowrap text-[10px] font-medium leading-none text-white"
                 style={{
                   left: `${d.centerX}%`,
-                  color: displayValue < 0 ? "var(--color-outcome-loss)" : undefined,
+                  color: displayValue < 0 ? CARD_LOSS_COLOR : undefined,
                 }}
               >
                 {displayValue}
@@ -532,7 +550,7 @@ function PlayerOutcomeCard({ entry }: { entry: RemainingPlayerAnalysis }) {
               className="absolute -translate-x-1/2 whitespace-nowrap text-[10px] font-medium leading-none text-white"
               style={{
                 left: `${d.leftX}%`,
-                color: startValue < 0 ? "var(--color-outcome-loss)" : undefined,
+                color: startValue < 0 ? CARD_LOSS_COLOR : undefined,
               }}
             >
               {startValue}
@@ -542,7 +560,7 @@ function PlayerOutcomeCard({ entry }: { entry: RemainingPlayerAnalysis }) {
               className="absolute -translate-x-1/2 whitespace-nowrap text-[10px] font-medium leading-none text-white"
               style={{
                 left: `${d.rightX}%`,
-                color: endValue < 0 ? "var(--color-outcome-loss)" : undefined,
+                color: endValue < 0 ? CARD_LOSS_COLOR : undefined,
               }}
             >
               {endValue}
@@ -593,52 +611,27 @@ function PlayerOutcomeCard({ entry }: { entry: RemainingPlayerAnalysis }) {
           // the border's red/green for the same two colors, so a
           // green-text/red-border (or vice versa) badge read as
           // contradictory instead of as two separate facts.
-          // Same CSS vars as the chart/legend (not a separate Tailwind
-          // class) so this can never drift out of sync with whatever
-          // win/loss color those are set to.
+          // Same fixed CARD_WIN_COLOR/CARD_LOSS_COLOR as the chart/legend
+          // above (not a separate Tailwind class) so this can never drift
+          // out of sync with whatever those are set to.
           const borderColor = !selectedCombo
             ? "var(--color-border)"
             : selectedCombo[i]
-            ? "var(--color-outcome-win)"
-            : "var(--color-outcome-loss)";
+            ? CARD_WIN_COLOR
+            : CARD_LOSS_COLOR;
           return (
-            <span
+            <Link
               key={l.leagueId}
-              title={l.description}
-              className="inline-flex items-center rounded-full border px-1.5 py-0.5 text-[10px] font-semibold text-foreground transition-colors"
+              href={`/dashboard/leagues/${l.leagueId}`}
+              className="inline-flex items-center rounded-full border px-1.5 py-0.5 text-[10px] font-semibold text-foreground transition-colors hover:bg-muted"
               style={{ borderColor }}
             >
               {l.leagueName}
-            </span>
+            </Link>
           );
         })}
       </div>
     </div>
-  );
-}
-
-function FilterPill({
-  isActive,
-  onClick,
-  children,
-}: {
-  isActive: boolean;
-  onClick: () => void;
-  children: React.ReactNode;
-}) {
-  return (
-    <button
-      type="button"
-      aria-pressed={isActive}
-      onClick={onClick}
-      className={`rounded-full px-2.5 py-1 text-xs font-semibold transition-colors ${
-        isActive
-          ? "bg-primary text-primary-foreground"
-          : "border border-border text-muted-foreground hover:bg-muted"
-      }`}
-    >
-      {children}
-    </button>
   );
 }
 
@@ -667,73 +660,11 @@ function PlayerOutcomesSection({
 }: {
   players: RemainingPlayerAnalysis[];
 }) {
-  // Every distinct league that appears across these players, in first-seen
-  // order — computed from the data itself rather than a fixed list, since
-  // which leagues exist is different for every user.
-  const leagueOptions = useMemo(() => {
-    const seen = new Map<string, string>();
-    for (const p of players) {
-      for (const l of p.leagues) {
-        if (!seen.has(l.leagueId)) seen.set(l.leagueId, l.leagueName);
-      }
-    }
-    return [...seen.entries()].map(([leagueId, leagueName]) => ({ leagueId, leagueName }));
-  }, [players]);
-
-  // Independently toggleable, not one-of-N — a player showing up in ANY
-  // selected league stays visible, since a "mix" player by definition spans
-  // more than one league and narrowing to just one shouldn't hide them
-  // entirely. Starts with every league selected so the filter has no effect
-  // until you narrow it.
-  const [selectedLeagues, setSelectedLeagues] = useState<Set<string>>(
-    () => new Set(leagueOptions.map((l) => l.leagueId)),
-  );
-  function toggleLeague(id: string) {
-    setSelectedLeagues((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  }
-
-  const filtered = players.filter((p) => p.leagues.some((l) => selectedLeagues.has(l.leagueId)));
-
   return (
-    <div className="flex flex-col gap-4">
-      {/* Sticky: this header (league filter) stays on screen while the card
-          grid below it scrolls underneath. Stacks right below the (also
-          sticky) tab bar, which is right below the (also sticky) site
-          header — both heights are measured live via ElementHeightVar, not
-          guessed, so this can't drift out of alignment the way a hardcoded
-          pixel offset would the moment either one's actual height changes. */}
-      <div
-        className="sticky z-[5] -mx-4 flex flex-col gap-3 bg-background px-4 pb-3 pt-3"
-        style={{ top: "calc(var(--site-header-height, 69px) + var(--tabs-height, 64px))" }}
-      >
-        <div className="flex flex-wrap gap-1.5">
-          {leagueOptions.map((l) => (
-            <FilterPill
-              key={l.leagueId}
-              isActive={selectedLeagues.has(l.leagueId)}
-              onClick={() => toggleLeague(l.leagueId)}
-            >
-              {l.leagueName}
-            </FilterPill>
-          ))}
-        </div>
-      </div>
-      {filtered.length === 0 ? (
-        <p className="rounded-xl border border-dashed border-border p-6 text-center text-sm text-muted-foreground">
-          No remaining players in the selected leagues.
-        </p>
-      ) : (
-        <div className="grid gap-3 sm:grid-cols-2">
-          {filtered.map((entry) => (
-            <PlayerOutcomeCard key={entry.playerId} entry={entry} />
-          ))}
-        </div>
-      )}
+    <div className="grid gap-3 sm:grid-cols-2">
+      {players.map((entry) => (
+        <PlayerOutcomeCard key={entry.playerId} entry={entry} />
+      ))}
     </div>
   );
 }
