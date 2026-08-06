@@ -4,7 +4,7 @@ import { and, desc, eq } from "drizzle-orm";
 import { auth } from "@/auth";
 import { db } from "@/db/client";
 import { connectedLeagues, platformIdentities } from "@/db/schema";
-import { AnalysisSection } from "@/components/analysis-section";
+import { AnalysisSection, WinScenariosSection } from "@/components/analysis-section";
 import { AvatarImage } from "@/components/avatar-image";
 import { IntelTabs } from "@/components/intel-tabs";
 import { RemoveLeagueButton } from "@/components/remove-league-button";
@@ -382,6 +382,9 @@ export default async function DashboardPage() {
         <IntelTabs
           overview={
             <Fragment key="overview">
+              <WinScenariosSection
+                winCountDistribution={analysis.totalMatchups > 1 ? analysis.winCountDistribution : null}
+              />
               <MatchupsTab
                 needsSetup={needsSetup}
                 needsReconnectIds={needsReconnectIds}

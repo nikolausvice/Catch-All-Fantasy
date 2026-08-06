@@ -113,13 +113,29 @@ export interface RemainingPlayerAnalysis {
      */
     remainingOthers: number;
     /**
-     * True once this player's own game has finished (or started, for the
-     * live-scoring case folded in below) in this league — their contribution
-     * here is their actual score, not a projection, and breakEvenPoints is
-     * retrospective ("what they needed") rather than actionable.
+     * The combined uncertainty (one standard deviation, in points) of every
+     * OTHER still-unresolved starter in this league besides this player —
+     * same weekly-variance figure the Monte Carlo simulation elsewhere in
+     * this file uses (projectedPoints × 0.45 per player, combined in
+     * quadrature across all of them). Unlike remainingOthers (a plain
+     * headcount), this actually distinguishes a league where the other
+     * starter left is a boom/bust WR1 from one where it's a low-ceiling
+     * kicker — meant to size how wide a "this threshold could still move"
+     * visual should be, not just whether one is shown at all.
+     */
+    remainingSd: number;
+    /**
+     * True only once THIS LEAGUE's matchup has nothing left uncertain —
+     * this player's own game AND every other starter on either roster have
+     * all finished. This player finishing their own game is not enough:
+     * their opponent's other starters (or their own teammates) can still be
+     * live and swing the league after this player's score is already
+     * locked in, so breakEvenPoints only becomes retrospective ("what they
+     * needed") rather than actionable once nothing else in the league can
+     * move it anymore.
      */
     resolved: boolean;
-    /** Only meaningful when resolved: whether they actually cleared breakEvenPoints. null while still pending. */
+    /** Only meaningful when resolved (the whole league, not just this player, is decided): whether they actually cleared breakEvenPoints. null while anything in the league is still pending. */
     resolvedWin: boolean | null;
   }[];
   /**
@@ -349,41 +365,38 @@ function remainingContribution(p: LeagueTeamPlayer): number {
  * Partitions a conflicted player's possible final score into bands and
  * reports the resulting win-loss record (across every league they affect)
  * in each — e.g. "0.0–12.4 pts → 0-2", "12.4–18.6 → 1-1", "18.6+ → 2-0".
- * Each still-pending "your" league contributes a "need >= x to win"
- * threshold; each still-pending "opp" league contributes a "need <= y to
- * win" threshold. Sorting the union of thresholds splits the score axis into
- * segments with a constant win/loss count; adjacent segments with an
- * identical record are merged. Not floored at 0 — see the sweet-spot comment
- * above for why negative bands are real.
+ * Each "your" league contributes a "need >= x to win" threshold; each "opp"
+ * league contributes a "need <= y to win" threshold. Sorting the union of
+ * thresholds splits the score axis into segments with a constant win/loss
+ * count; adjacent segments with an identical record are merged. Not floored
+ * at 0 — see the sweet-spot comment above for why negative bands are real.
  *
- * Resolved leagues (this player's game already over) don't belong on that
- * axis at all — their outcome is fixed, it doesn't change with a hypothetical
- * score in some other, still-live league — so they're folded in as a
- * constant win/loss baseline added to every band instead.
+ * A resolved league (this player's game already over) is included exactly
+ * like a pending one, not folded into a fixed constant — its breakEvenPoints
+ * is still a real question, just a retrospective one ("would this have been
+ * a win if they'd scored more"), and the whole point of drawing its
+ * threshold on the chart is to let that counterfactual actually flip the
+ * color on either side of it. Baking in the ACTUAL result as a constant
+ * instead would draw a marker that visually implied a split which never
+ * happens — the line staying one flat color straight through it.
  */
 function computeRecordBands(
   yourLeagues: RemainingPlayerAnalysis["leagues"],
   oppLeagues: RemainingPlayerAnalysis["leagues"],
 ): { min: number; max: number | null; wins: number; losses: number }[] {
-  const pendingYour = yourLeagues.filter((l) => !l.resolved);
-  const pendingOpp = oppLeagues.filter((l) => !l.resolved);
-  const resolvedLeagues = [...yourLeagues, ...oppLeagues].filter((l) => l.resolved);
-  const fixedWins = resolvedLeagues.filter((l) => l.resolvedWin).length;
-  const fixedLosses = resolvedLeagues.length - fixedWins;
-
   const thresholds = new Set<number>([0]);
-  for (const l of pendingYour) thresholds.add(l.breakEvenPoints ?? 0);
-  for (const l of pendingOpp) thresholds.add(l.breakEvenPoints ?? 0);
+  for (const l of yourLeagues) thresholds.add(l.breakEvenPoints ?? 0);
+  for (const l of oppLeagues) thresholds.add(l.breakEvenPoints ?? 0);
   const points = [...thresholds].sort((a, b) => a - b);
 
   function outcomeAt(testScore: number): { wins: number; losses: number } {
-    let wins = fixedWins;
-    let losses = fixedLosses;
-    for (const l of pendingYour) {
+    let wins = 0;
+    let losses = 0;
+    for (const l of yourLeagues) {
       if (testScore >= (l.breakEvenPoints ?? 0)) wins++;
       else losses++;
     }
-    for (const l of pendingOpp) {
+    for (const l of oppLeagues) {
       if (testScore <= (l.breakEvenPoints ?? 0)) wins++;
       else losses++;
     }
@@ -721,6 +734,16 @@ export function analyzeCrossLeague(
   // a break-even threshold is only an exact guarantee when this is 1 (i.e.
   // this player is the very last one left to play in that league).
   const remainingCountByLeague = new Map<string, number>();
+  // Combined variance (not yet standard deviation — squared, so it can be
+  // summed before a single sqrt at the end) of EVERY remaining starter in
+  // each league, both sides. Per-player breakEven entries below subtract
+  // out their own contribution to get "every OTHER remaining starter's"
+  // figure specifically.
+  const remainingVarianceByLeague = new Map<string, number>();
+  function playerVariance(p: LeagueTeamPlayer): number {
+    const sd = (p.projectedPoints ?? 0) * VARIANCE_COEFF;
+    return sd * sd;
+  }
 
   for (const { leagueId, platform, matchup } of matchupResults) {
     if (!matchup || !matchup.opponent) continue;
@@ -728,6 +751,10 @@ export function analyzeCrossLeague(
     const myRemaining = matchup.team.players.filter((p) => isRemaining(p, status));
     const oppRemaining = matchup.opponent.players.filter((p) => isRemaining(p, status));
     remainingCountByLeague.set(leagueId, myRemaining.length + oppRemaining.length);
+    remainingVarianceByLeague.set(
+      leagueId,
+      [...myRemaining, ...oppRemaining].reduce((sum, p) => sum + playerVariance(p), 0),
+    );
     // Computed from currentScore + each remaining starter's own remaining
     // contribution (not the platform's aggregate teamProjectedScore/
     // opponentProjectedScore) so that subtracting a specific remaining
@@ -773,8 +800,12 @@ export function analyzeCrossLeague(
     // conflict with may still be live.
     for (const player of matchup.team.players) {
       if (!player.isStarter) continue;
-      const resolved = !isRemaining(player, status);
-      const derivedStatus = derivedPlayerStatus(player, resolved, status);
+      // This player's OWN game only — not whether this league is decided.
+      // Other starters on either roster can easily still be live after this
+      // one finishes, so this alone must never drive resolvedWin, isExact,
+      // or hiding this league's threshold; see leagueResolved below for that.
+      const playerResolved = !isRemaining(player, status);
+      const derivedStatus = derivedPlayerStatus(player, playerResolved, status);
       // The TOTAL figure — their locked actual score once resolved, their
       // full projected total while pending. Always the FULL total, not just
       // what's still left to add: breakEven below is itself a total-points
@@ -784,7 +815,7 @@ export function analyzeCrossLeague(
       // which would then drift as their live score changes, moving the
       // threshold along with them instead of holding it fixed while their
       // dot moves toward it.
-      const pContribution = resolved ? player.points ?? 0 : player.projectedPoints ?? 0;
+      const pContribution = playerResolved ? player.points ?? 0 : player.projectedPoints ?? 0;
       // Same real-player identity as the rest of the app (roster-overlap.ts,
       // outcome-landscape.ts) — not playerKey's platform+raw-id scheme, which
       // deliberately keeps platforms separate and (for demo leagues, whose
@@ -800,12 +831,33 @@ export function analyzeCrossLeague(
       const breakEven = proj.oppProj - myWithout; // needed >= this to win
       const winningWithout = myWithout > proj.oppProj;
 
-      const desc = resolved
+      // Every OTHER remaining starter (either side) in this league besides
+      // this one. remainingCountByLeague/remainingVarianceByLeague are built
+      // from isRemaining, so they already EXCLUDE this player the moment
+      // their own game ends — subtracting this player's own count/variance
+      // out is only correct, and only needed, while they're still pending
+      // (still counted in those totals themselves).
+      const othersRemaining = playerResolved
+        ? remainingCountByLeague.get(leagueId) ?? 0
+        : Math.max(0, (remainingCountByLeague.get(leagueId) ?? 1) - 1);
+      const othersVariance = playerResolved
+        ? remainingVarianceByLeague.get(leagueId) ?? 0
+        : Math.max(0, (remainingVarianceByLeague.get(leagueId) ?? 0) - playerVariance(player));
+      // The whole league is only actually decided once BOTH this player's
+      // own game is over AND nothing else left in the league can still move
+      // the result — not the moment this one player finishes.
+      const leagueResolved = playerResolved && othersRemaining === 0;
+
+      const desc = leagueResolved
         ? winningWithout
           ? `Won this league even without ${player.name}'s ${pContribution.toFixed(1)} pts`
           : `Scored ${pContribution.toFixed(1)} pts — ${
               pContribution >= breakEven ? "enough to" : "not enough to"
             } secure the win`
+        : playerResolved
+        ? pContribution >= breakEven
+          ? `Scored ${pContribution.toFixed(1)} pts, cleared the ${breakEven.toFixed(1)} they needed — still waiting on ${othersRemaining} other starter${othersRemaining === 1 ? "" : "s"}`
+          : `Scored ${pContribution.toFixed(1)} pts, short of the ${breakEven.toFixed(1)} they needed — still waiting on ${othersRemaining} other starter${othersRemaining === 1 ? "" : "s"}`
         : winningWithout
         ? `Projected to win even if ${player.name} scores 0`
         : breakEven > 0
@@ -846,10 +898,11 @@ export function analyzeCrossLeague(
         breakEvenPoints: breakEven,
         winningWithout,
         description: desc,
-        isExact: resolved || remainingCountByLeague.get(leagueId) === 1,
-        remainingOthers: resolved ? 0 : (remainingCountByLeague.get(leagueId) ?? 1) - 1,
-        resolved,
-        resolvedWin: resolved ? pContribution >= breakEven : null,
+        isExact: othersRemaining === 0,
+        remainingOthers: othersRemaining,
+        remainingSd: Math.sqrt(othersVariance),
+        resolved: leagueResolved,
+        resolvedWin: leagueResolved ? pContribution >= breakEven : null,
       });
     }
 
@@ -857,10 +910,13 @@ export function analyzeCrossLeague(
     if (matchup.opponent) {
       for (const player of matchup.opponent.players) {
         if (!player.isStarter) continue;
-        const resolved = !isRemaining(player, status);
-        const derivedStatus = derivedPlayerStatus(player, resolved, status);
+        // This player's OWN game only — see the matching comment above the
+        // "My starters" loop for why this must not drive resolvedWin/
+        // isExact/the threshold display on its own.
+        const playerResolved = !isRemaining(player, status);
+        const derivedStatus = derivedPlayerStatus(player, playerResolved, status);
         // See the matching comments above the "My starters" loop.
-        const pContribution = resolved ? player.points ?? 0 : player.projectedPoints ?? 0;
+        const pContribution = playerResolved ? player.points ?? 0 : player.projectedPoints ?? 0;
         // See the matching comment above — same real-player identity as the
         // rest of the app, not the platform+raw-id scheme.
         const key = normalizePlayerKey(player.name, player.position);
@@ -872,12 +928,25 @@ export function analyzeCrossLeague(
         const maxAllowed = proj.myProj - oppWithout;
         const winningWithout = proj.myProj > oppWithout;
 
-        const desc = resolved
+        // See the matching comment above the "My starters" loop.
+        const othersRemaining = playerResolved
+          ? remainingCountByLeague.get(leagueId) ?? 0
+          : Math.max(0, (remainingCountByLeague.get(leagueId) ?? 1) - 1);
+        const othersVariance = playerResolved
+          ? remainingVarianceByLeague.get(leagueId) ?? 0
+          : Math.max(0, (remainingVarianceByLeague.get(leagueId) ?? 0) - playerVariance(player));
+        const leagueResolved = playerResolved && othersRemaining === 0;
+
+        const desc = leagueResolved
           ? winningWithout
             ? `Won this league even though ${player.name} scored ${pContribution.toFixed(1)} pts`
             : `${player.name} scored ${pContribution.toFixed(1)} pts — ${
                 pContribution <= maxAllowed ? "still" : "not"
               } enough for you to win`
+          : playerResolved
+          ? pContribution <= maxAllowed
+            ? `${player.name} scored ${pContribution.toFixed(1)} pts, within the ${maxAllowed.toFixed(1)} limit so far — waiting on ${othersRemaining} other starter${othersRemaining === 1 ? "" : "s"}`
+            : `${player.name} scored ${pContribution.toFixed(1)} pts, over the ${maxAllowed.toFixed(1)} limit — waiting on ${othersRemaining} other starter${othersRemaining === 1 ? "" : "s"}`
           : winningWithout
           ? `Winning even if ${player.name} scores their projection (${pContribution.toFixed(1)} pts)`
           : maxAllowed > 0
@@ -916,10 +985,11 @@ export function analyzeCrossLeague(
           breakEvenPoints: maxAllowed,
           winningWithout,
           description: desc,
-          isExact: resolved || remainingCountByLeague.get(leagueId) === 1,
-          remainingOthers: resolved ? 0 : (remainingCountByLeague.get(leagueId) ?? 1) - 1,
-          resolved,
-          resolvedWin: resolved ? pContribution <= maxAllowed : null,
+          isExact: othersRemaining === 0,
+          remainingOthers: othersRemaining,
+          remainingSd: Math.sqrt(othersVariance),
+          resolved: leagueResolved,
+          resolvedWin: leagueResolved ? pContribution <= maxAllowed : null,
         });
       }
     }

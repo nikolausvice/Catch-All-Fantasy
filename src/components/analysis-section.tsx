@@ -52,8 +52,11 @@ function computeComboBands(
     // edge is itself a threshold.
     const testScore = band.max != null ? (band.min + band.max) / 2 : band.min + Math.max(1, Math.abs(band.min) * 0.1);
 
+    // Every league uses the same testScore comparison, resolved or not —
+    // see the matching comment on computeRecordBands for why a resolved
+    // league's breakEvenPoints is still a real (retrospective) threshold
+    // rather than a fixed constant.
     const combo = entry.leagues.map((l) => {
-      if (l.resolved) return l.resolvedWin === true;
       const breakEven = l.breakEvenPoints ?? 0;
       return l.role === "your-starter" ? testScore >= breakEven : testScore <= breakEven;
     });
@@ -86,6 +89,21 @@ function sanitizeId(s: string): string {
 function isDefensePosition(position: string | null): boolean {
   const p = (position ?? "").toUpperCase();
   return p === "DST" || p === "DEF" || p === "D/ST";
+}
+
+/** The score chip's own border reports playing status, not outcome — see
+ * the matching comment in globals.css for why these are deliberately
+ * neutral instead of drawn from the win/mid/loss palette. */
+function statusBorderColor(status: "pre" | "in" | "post"): string {
+  if (status === "pre") return "var(--color-status-pre)";
+  if (status === "in") return "var(--color-status-live)";
+  return "var(--color-status-post)";
+}
+
+function statusLabel(status: "pre" | "in" | "post"): string {
+  if (status === "pre") return "Yet to play";
+  if (status === "in") return "Live";
+  return "Final";
 }
 
 /**
@@ -153,10 +171,10 @@ function WinDistribution({ distribution }: { distribution: number[] }) {
  * break-evens sit in the 0–10 range shouldn't be squeezed into a shared axis stretched by
  * some other player's break-even out at 80.
  *
- * Built only from still-pending leagues' thresholds, same as computeRecordBands — a
- * resolved league's breakEvenPoints is retrospective, not part of the live axis, and
- * stretching the domain to fit it would open a gap between the domain edge and where
- * the colored line (which also ignores resolved thresholds) actually starts.
+ * Includes RESOLVED leagues' thresholds too, not just pending ones — a resolved league's
+ * breakEvenPoints is retrospective ("what they needed") rather than actionable, but it's
+ * still drawn (see the dividers filter below), so the axis needs room for it too, or it'd
+ * get clamped to the domain edge and sit disconnected from where it actually belongs.
  *
  * Also excludes any threshold that won't actually be plotted (a negative,
  * already-covered one, hidden per allowNegativeDisplay) — otherwise the
@@ -168,14 +186,23 @@ function computePlayerDomain(
   allowNegativeDisplay: boolean,
   isDefense: boolean,
 ): { min: number; max: number } {
-  const pending = entry.leagues.filter(
-    (l) => !l.resolved && (allowNegativeDisplay || (l.breakEvenPoints ?? 0) >= 0),
+  const relevant = entry.leagues.filter(
+    (l) => l.breakEvenPoints != null && (allowNegativeDisplay || l.breakEvenPoints >= 0),
   );
-  const breakEvens = pending.map((l) => l.breakEvenPoints ?? 0);
+  const breakEvens = relevant.map((l) => l.breakEvenPoints ?? 0);
 
   let min = 0;
   for (const be of breakEvens) min = Math.min(min, be);
-  let max = Math.max(10, ...breakEvens, entry.projectedPoints * 1.1, entry.currentPoints + 4);
+  // The "how far right should this go by default" baseline (projection/
+  // current-points headroom, no real threshold in play) is clamped to a
+  // 20–70 window so cards stay roughly comparable at a glance instead of
+  // one player's tiny 8-point range sitting next to another's 95-point
+  // range — but a REAL threshold always wins over the clamp: breakEvens is
+  // deliberately outside the Math.min/Math.max pair below, so a genuine
+  // break-even past 70 still stretches the axis to show it rather than
+  // getting silently clipped off-screen.
+  const baselineMax = Math.min(70, Math.max(20, entry.projectedPoints * 1.1, entry.currentPoints + 4));
+  let max = Math.max(baselineMax, ...breakEvens);
   if (max <= min) max = min + 10;
 
   // Pad — but ONLY the side that actually needs it, and only when it
@@ -195,8 +222,13 @@ function computePlayerDomain(
       // A defense can realistically score deep negative (points-allowed
       // penalties stack up fast), so a real negative threshold for one gets
       // real headroom to match — not just the same small pad every other
-      // position gets — down to a -20 floor rather than a token few points.
-      min = isDefense ? Math.min(min - pad, -20) : min - pad;
+      // position gets. But -20 is a HARD cap, not a "extend further if the
+      // real number is more extreme" baseline like the max side: an actual
+      // computed threshold past -20 is a projection-math artifact, not a
+      // realistic score, so it gets clamped to sit right at the axis edge
+      // (pct() already clamps the divider itself) instead of stretching the
+      // whole card to make room for a number nobody will actually see hit.
+      min = isDefense ? Math.max(min - pad, -20) : min - pad;
     }
   }
   return { min, max };
@@ -216,8 +248,20 @@ function PlayerOutcomeCard({ entry }: { entry: RemainingPlayerAnalysis }) {
   const total = entry.leagues.length;
   const pct = (x: number) =>
     ((Math.min(Math.max(x, domainMin), domainMax) - domainMin) / span) * 100;
+  // Inverse of pct — turns a box edge's chart-percent position back into a
+  // real points value, for labeling the box's actual start/end rather than
+  // just its (already-known) center threshold.
+  const unpct = (x: number) => domainMin + (x / 100) * span;
   const comboBands = computeComboBands(entry);
-  const uniqueCombos = [...new Map(comboBands.map((b) => [b.combo.join(","), b])).values()];
+  // Only combos that actually occupy visible width on THIS card's own
+  // (possibly negative-threshold-excluding) domain — computeRecordBands
+  // works off the real, unbounded breakEven values, so a band that sits
+  // entirely outside [domainMin, domainMax] (e.g. split off by a hidden
+  // negative threshold) is real but invisible once clamped through pct().
+  // Without this, the legend could show a swatch for a color that never
+  // actually appears anywhere on the line.
+  const visibleComboBands = comboBands.filter((b) => pct(b.max ?? domainMax) > pct(b.min));
+  const uniqueCombos = [...new Map(visibleComboBands.map((b) => [b.combo.join(","), b])).values()];
   // Which legend swatch is currently clicked, if any — drives the win/loss
   // border painted onto the league badges below, so the legend's job is to
   // let you ask "what does THIS combo mean for each league" on demand
@@ -225,32 +269,36 @@ function PlayerOutcomeCard({ entry }: { entry: RemainingPlayerAnalysis }) {
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const selectedCombo = uniqueCombos.find((b) => b.combo.join(",") === selectedKey)?.combo ?? null;
 
-  // Resolved leagues are excluded — their threshold is retrospective, not
-  // part of this "what should they do from here" axis, and with
-  // computePlayerDomain also excluding them, plotting one here would sit
-  // right at (or past) the domain edge, disconnected from the colored line.
+  // Resolved leagues are included, not skipped — their threshold is
+  // retrospective ("what they needed, holding everyone else's actual final
+  // score fixed") rather than actionable, but it's still real information
+  // worth showing on the line. isExact is already true for every resolved
+  // league (nothing else left uncertain — see leagueResolved in
+  // cross-league.ts), so halfWidth below collapses it to a plain bar
+  // automatically: a resolved league's retrospective marker is always a
+  // line, never a box, without needing any special-casing here.
   //
-  // A negative, hidden-per-allowNegativeDisplay threshold is excluded too —
-  // otherwise we'd draw a real box at its real (often far-off) position but
-  // label it "0" because the true number is hidden, which is exactly the
-  // "why is there a box sitting around zero" confusion: the box's position
+  // A negative, hidden-per-allowNegativeDisplay threshold is excluded —
+  // otherwise we'd draw a real marker at its real (often far-off) position
+  // but label it "0" because the true number is hidden, which is exactly
+  // the "why is there a marker sitting around zero" confusion: its position
   // and its label would no longer describe the same value. With nothing
   // honest left to show, skip the marker entirely instead.
   const rawDividers = entry.leagues
-    .filter(
-      (l) =>
-        l.breakEvenPoints != null &&
-        !l.resolved &&
-        (allowNegativeDisplay || l.breakEvenPoints >= 0),
-    )
+    .filter((l) => l.breakEvenPoints != null && (allowNegativeDisplay || l.breakEvenPoints >= 0))
     .map((l) => {
       const x = pct(l.breakEvenPoints!);
-      // Uncertainty as width instead of a percentage: each OTHER
-      // still-unfinished starter (either side) is one more independent
-      // source of variance that could move this threshold, so the box
-      // widens — a lone remaining starter (remainingOthers = 0) collapses
-      // to zero width, drawn as a single bar instead of a box.
-      const halfWidth = l.isExact ? 0 : 6 * (l.remainingOthers / (1 + l.remainingOthers));
+      // Uncertainty as width instead of a percentage — one standard
+      // deviation (remainingSd, in points, converted to this card's own
+      // percent-of-axis scale) of every OTHER still-unfinished starter's
+      // (either side) combined projection variance, not just a headcount
+      // of how many there are. A league whose only other starter left is a
+      // boom/bust WR1 gets a visibly wider box than one where it's a
+      // low-ceiling kicker, even though "remainingOthers" would be 1 in
+      // both cases. Capped so one outlier-variance league can't swallow the
+      // whole card; a lone remaining starter (isExact) still collapses to
+      // zero width, drawn as a single bar instead of a box.
+      const halfWidth = l.isExact ? 0 : Math.min(15, (l.remainingSd / span) * 100);
       const leftX = Math.max(0, x - halfWidth);
       const rightX = Math.min(100, x + halfWidth);
 
@@ -294,24 +342,45 @@ function PlayerOutcomeCard({ entry }: { entry: RemainingPlayerAnalysis }) {
     // chain (member[i].colorB === member[i+1].colorA) so this reconstructs
     // every distinct combo-band color the whole merged span crosses.
     const colors = [members[0].colorA, ...members.map((m) => m.colorB)];
-    const avgBreakEven =
-      members.reduce((sum, m) => sum + m.league.breakEvenPoints!, 0) / members.length;
     const key = members.map((m) => m.league.leagueId).join("+");
     return {
       key,
       leftX,
       rightX,
       centerX: (leftX + rightX) / 2,
+      // The box's actual start/end in points, not just its center threshold
+      // — lets a reader see the real range this could still land in, rather
+      // than a single number that implies more precision than the box
+      // itself is showing. Also what a single-point (isExact) divider's own
+      // label reads from — never the raw breakEvenPoints, which can sit past
+      // a domain cap (e.g. a defense's -20 floor) that this position, being
+      // derived from the already-clamped leftX/rightX, correctly respects.
+      leftPoints: unpct(leftX),
+      rightPoints: unpct(rightX),
       isSinglePoint,
       colors,
-      avgBreakEven,
       patternId: isSinglePoint ? null : `stripe-${sanitizeId(entry.playerId)}-${sanitizeId(key)}`,
     };
   });
 
   return (
-    <div className="flex flex-col gap-2 rounded-xl border border-border bg-card p-4">
+    <div className="flex flex-col gap-2 rounded-xl bg-card p-4">
       <p className="truncate text-center text-sm font-medium">{entry.name}</p>
+      {/* Current score, averaged across leagues already (entry.currentPoints).
+          Plain chip, not colored by outcome — the border is playing status
+          instead, and this chip is now the only place status shows at all,
+          since the card itself no longer carries a status border. A row of
+          its own (not an overlay on the dot) is also what buys the
+          breathing room between the name and the chart. */}
+      <div className="flex justify-center">
+        <span
+          className="inline-flex items-center rounded-full border-2 px-2 py-0.5 text-xs font-bold text-foreground"
+          style={{ borderColor: statusBorderColor(entry.status) }}
+          title={statusLabel(entry.status)}
+        >
+          {Math.round(entry.currentPoints)}
+        </span>
+      </div>
       <div className="relative h-6 w-full">
         <svg
           viewBox="0 0 100 10"
@@ -429,29 +498,56 @@ function PlayerOutcomeCard({ entry }: { entry: RemainingPlayerAnalysis }) {
         />
       </div>
       <div className="relative h-4 w-full">
-        {dividers.map((d) => {
-          // dividers already excludes any negative threshold that isn't
-          // allowed to be shown, so this is always the real, honest value —
-          // and, for a merged group, one number (the average of its
-          // members) instead of several colliding ones.
-          const displayValue = Math.round(d.avgBreakEven);
-          return (
+        {dividers.flatMap((d) => {
+          // A single-point divider (isExact, zero-width) has nothing to
+          // range over — one centered number, same as before. A real box
+          // gets ITS ACTUAL start and end labeled instead of one number at
+          // the center, so the range the record could still flip across is
+          // visible, not just implied by the box's width.
+          if (d.isSinglePoint) {
+            const displayValue = Math.round(d.leftPoints);
+            return [
+              <span
+                key={`label-${d.key}`}
+                // Only the "already covered" (negative) case gets colored —
+                // same red as everywhere else (--color-outcome-loss). A
+                // normal, still-actionable positive threshold is plain
+                // white, not green; it's not calling out a good/bad
+                // outcome, just a number.
+                className="absolute -translate-x-1/2 whitespace-nowrap text-[10px] font-medium leading-none text-white"
+                style={{
+                  left: `${d.centerX}%`,
+                  color: displayValue < 0 ? "var(--color-outcome-loss)" : undefined,
+                }}
+              >
+                {displayValue}
+              </span>,
+            ];
+          }
+          const startValue = Math.round(d.leftPoints);
+          const endValue = Math.round(d.rightPoints);
+          return [
             <span
-              key={`label-${d.key}`}
-              // Only the "already covered" (negative) case gets colored —
-              // same red as everywhere else (--color-outcome-loss). A
-              // normal, still-actionable positive threshold is plain white,
-              // not green; it's not calling out a good/bad outcome, just a
-              // number.
+              key={`label-start-${d.key}`}
               className="absolute -translate-x-1/2 whitespace-nowrap text-[10px] font-medium leading-none text-white"
               style={{
-                left: `${d.centerX}%`,
-                color: displayValue < 0 ? "var(--color-outcome-loss)" : undefined,
+                left: `${d.leftX}%`,
+                color: startValue < 0 ? "var(--color-outcome-loss)" : undefined,
               }}
             >
-              {displayValue}
-            </span>
-          );
+              {startValue}
+            </span>,
+            <span
+              key={`label-end-${d.key}`}
+              className="absolute -translate-x-1/2 whitespace-nowrap text-[10px] font-medium leading-none text-white"
+              style={{
+                left: `${d.rightX}%`,
+                color: endValue < 0 ? "var(--color-outcome-loss)" : undefined,
+              }}
+            >
+              {endValue}
+            </span>,
+          ];
         })}
       </div>
       {/* Legend for the combo colors above — every card gets one, even a
@@ -492,12 +588,11 @@ function PlayerOutcomeCard({ entry }: { entry: RemainingPlayerAnalysis }) {
       <div className="flex flex-wrap justify-center gap-1">
         {entry.leagues.map((l, i) => {
           // Red/green here is reserved for ONE thing: the win/loss border
-          // from the legend selection. Role identity (your starter vs.
-          // opponent's) is carried entirely by the ↑/↓ glyph, with plain
-          // neutral text — coloring the text red/green by role too would
-          // have it fighting the border's red/green for the same two
-          // colors, so a green-text/red-border (or vice versa) badge read
-          // as contradictory instead of as two separate facts.
+          // from the legend selection — plain neutral text otherwise.
+          // Coloring the text red/green by role too would have it fighting
+          // the border's red/green for the same two colors, so a
+          // green-text/red-border (or vice versa) badge read as
+          // contradictory instead of as two separate facts.
           // Same CSS vars as the chart/legend (not a separate Tailwind
           // class) so this can never drift out of sync with whatever
           // win/loss color those are set to.
@@ -510,10 +605,9 @@ function PlayerOutcomeCard({ entry }: { entry: RemainingPlayerAnalysis }) {
             <span
               key={l.leagueId}
               title={l.description}
-              className="inline-flex items-center gap-0.5 rounded-full border px-1.5 py-0.5 text-[10px] font-semibold text-foreground transition-colors"
+              className="inline-flex items-center rounded-full border px-1.5 py-0.5 text-[10px] font-semibold text-foreground transition-colors"
               style={{ borderColor }}
             >
-              <span aria-hidden="true">{l.role === "your-starter" ? "↑" : "↓"}</span>
               {l.leagueName}
             </span>
           );
@@ -548,12 +642,30 @@ function FilterPill({
   );
 }
 
-function PlayerOutcomesSection({
-  players,
+/** Lives on the Overview tab, not Outcomes — it's a summary of the whole
+ * week's shape ("how many of your leagues do you end up winning"), not
+ * something that needs to sit next to the per-player conflict cards it used
+ * to be paired with. */
+export function WinScenariosSection({
   winCountDistribution,
 }: {
-  players: RemainingPlayerAnalysis[];
   winCountDistribution: number[] | null;
+}) {
+  if (!winCountDistribution) return null;
+  return (
+    <div className="flex flex-col gap-3">
+      <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+        Win scenarios
+      </h2>
+      <WinDistribution distribution={winCountDistribution} />
+    </div>
+  );
+}
+
+function PlayerOutcomesSection({
+  players,
+}: {
+  players: RemainingPlayerAnalysis[];
 }) {
   // Every distinct league that appears across these players, in first-seen
   // order — computed from the data itself rather than a fixed list, since
@@ -589,23 +701,16 @@ function PlayerOutcomesSection({
 
   return (
     <div className="flex flex-col gap-4">
-      {/* Sticky: this header (title, win-count histogram, league filter)
-          stays on screen while the card grid below it scrolls underneath —
-          the histogram and filters are exactly what you want visible while
-          scanning a long list of players, not something to scroll past.
-          Stacks right below the (also sticky) tab bar, which is right below
-          the (also sticky) site header — both heights are measured live via
-          ElementHeightVar, not guessed, so this can't drift out of
-          alignment the way a hardcoded pixel offset would the moment either
-          one's actual height changes. */}
+      {/* Sticky: this header (league filter) stays on screen while the card
+          grid below it scrolls underneath. Stacks right below the (also
+          sticky) tab bar, which is right below the (also sticky) site
+          header — both heights are measured live via ElementHeightVar, not
+          guessed, so this can't drift out of alignment the way a hardcoded
+          pixel offset would the moment either one's actual height changes. */}
       <div
         className="sticky z-[5] -mx-4 flex flex-col gap-3 bg-background px-4 pb-3 pt-3"
         style={{ top: "calc(var(--site-header-height, 69px) + var(--tabs-height, 64px))" }}
       >
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-          Win scenarios
-        </h2>
-        {winCountDistribution && <WinDistribution distribution={winCountDistribution} />}
         <div className="flex flex-wrap gap-1.5">
           {leagueOptions.map((l) => (
             <FilterPill
@@ -648,10 +753,5 @@ export function AnalysisSection({
 
   if (analysis.remainingPlayers.length === 0) return null;
 
-  return (
-    <PlayerOutcomesSection
-      players={analysis.remainingPlayers}
-      winCountDistribution={analysis.totalMatchups > 1 ? analysis.winCountDistribution : null}
-    />
-  );
+  return <PlayerOutcomesSection players={analysis.remainingPlayers} />;
 }
