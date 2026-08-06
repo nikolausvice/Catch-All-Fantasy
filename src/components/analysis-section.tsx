@@ -166,6 +166,7 @@ function WinDistribution({ distribution }: { distribution: number[] }) {
 function computePlayerDomain(
   entry: RemainingPlayerAnalysis,
   allowNegativeDisplay: boolean,
+  isDefense: boolean,
 ): { min: number; max: number } {
   const pending = entry.leagues.filter(
     (l) => !l.resolved && (allowNegativeDisplay || (l.breakEvenPoints ?? 0) >= 0),
@@ -190,7 +191,13 @@ function computePlayerDomain(
   if (breakEvens.length > 0) {
     const pad = Math.max((max - min) * 0.12, 3);
     if (Math.max(...breakEvens) >= max) max += pad;
-    if (Math.min(...breakEvens) <= min) min -= pad;
+    if (Math.min(...breakEvens) <= min) {
+      // A defense can realistically score deep negative (points-allowed
+      // penalties stack up fast), so a real negative threshold for one gets
+      // real headroom to match — not just the same small pad every other
+      // position gets — down to a -20 floor rather than a token few points.
+      min = isDefense ? Math.min(min - pad, -20) : min - pad;
+    }
   }
   return { min, max };
 }
@@ -202,13 +209,13 @@ function PlayerOutcomeCard({ entry }: { entry: RemainingPlayerAnalysis }) {
   // and so can anyone whose live score has already gone negative — for
   // everyone else, any negative threshold is hidden entirely (not shown as
   // a misleading "0" — see the dividers filter below) rather than displayed.
-  const allowNegativeDisplay = isDefensePosition(entry.position) || entry.currentPoints < 0;
-  const { min: domainMin, max: domainMax } = computePlayerDomain(entry, allowNegativeDisplay);
+  const isDefense = isDefensePosition(entry.position);
+  const allowNegativeDisplay = isDefense || entry.currentPoints < 0;
+  const { min: domainMin, max: domainMax } = computePlayerDomain(entry, allowNegativeDisplay, isDefense);
   const span = domainMax - domainMin;
   const total = entry.leagues.length;
   const pct = (x: number) =>
     ((Math.min(Math.max(x, domainMin), domainMax) - domainMin) / span) * 100;
-  const isLive = entry.currentPoints > 0;
   const comboBands = computeComboBands(entry);
   const uniqueCombos = [...new Map(comboBands.map((b) => [b.combo.join(","), b])).values()];
   // Which legend swatch is currently clicked, if any — drives the win/loss
@@ -304,42 +311,8 @@ function PlayerOutcomeCard({ entry }: { entry: RemainingPlayerAnalysis }) {
 
   return (
     <div className="flex flex-col gap-2 rounded-xl border border-border bg-card p-4">
-      <div className="flex flex-col items-center gap-1 text-center">
-        <p className="truncate text-sm font-medium">{entry.name}</p>
-        <div className="flex flex-wrap justify-center gap-1">
-          {entry.leagues.map((l, i) => {
-            // Red/green here is reserved for ONE thing: the win/loss border
-            // from the legend selection. Role identity (your starter vs.
-            // opponent's) is carried entirely by the ↑/↓ glyph, with plain
-            // neutral text — coloring the text red/green by role too would
-            // have it fighting the border's red/green for the same two
-            // colors, so a green-text/red-border (or vice versa) badge read
-            // as contradictory instead of as two separate facts.
-            // Same CSS vars as the chart/legend (not a separate Tailwind
-            // class) so this can never drift out of sync with whatever
-            // win/loss color those are set to.
-            const borderColor = !selectedCombo
-              ? "var(--color-border)"
-              : selectedCombo[i]
-              ? "var(--color-outcome-win)"
-              : "var(--color-outcome-loss)";
-            return (
-              <span
-                key={l.leagueId}
-                title={l.description}
-                className="inline-flex items-center gap-0.5 rounded-full border px-1.5 py-0.5 text-[10px] font-semibold text-foreground transition-colors"
-                style={{ borderColor }}
-              >
-                <span aria-hidden="true">{l.role === "your-starter" ? "↑" : "↓"}</span>
-                {l.leagueName}
-              </span>
-            );
-          })}
-        </div>
-      </div>
-      {/* mt-2: a little breathing room below the league badges before the
-          chart starts — they were sitting right on top of each other. */}
-      <div className="relative mt-2 h-6 w-full">
+      <p className="truncate text-center text-sm font-medium">{entry.name}</p>
+      <div className="relative h-6 w-full">
         <svg
           viewBox="0 0 100 10"
           preserveAspectRatio="none"
@@ -372,7 +345,13 @@ function PlayerOutcomeCard({ entry }: { entry: RemainingPlayerAnalysis }) {
           {comboBands.map((band, i) => (
             <line
               key={i}
-              x1={pct(band.min)}
+              // The last band already falls back to domainMax when its own
+              // max is null (open-ended) — the first band needs the same
+              // fallback on its min, or a widened domain (e.g. the -20
+              // defense floor) leaves a blank gap between the true axis
+              // edge and wherever this band's own raw threshold happens to
+              // start, instead of that color simply filling the gap.
+              x1={pct(i === 0 ? domainMin : band.min)}
               y1={5}
               x2={pct(band.max ?? domainMax)}
               y2={5}
@@ -440,17 +419,14 @@ function PlayerOutcomeCard({ entry }: { entry: RemainingPlayerAnalysis }) {
             is non-uniformly scaled (preserveAspectRatio="none" on a 100x10
             viewBox stretched to fill a much wider-than-tall box) — a circle
             drawn in that coordinate space comes out as a stretched ellipse
-            on any screen wider than it is tall. */}
-        {isLive && (
-          <div
-            className="absolute top-1/2 h-2 w-2 -translate-x-1/2 -translate-y-1/2 rounded-full border"
-            style={{
-              left: `${pct(entry.currentPoints)}%`,
-              backgroundColor: "var(--color-foreground)",
-              borderColor: "var(--color-card)",
-            }}
-          />
-        )}
+            on any screen wider than it is tall.
+            Always shown — pregame, live, or final all have a real
+            currentPoints value worth marking (0 before kickoff is still a
+            real point on the axis, not "nothing to show"). */}
+        <div
+          className="absolute top-1/2 h-2 w-2 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white"
+          style={{ left: `${pct(entry.currentPoints)}%` }}
+        />
       </div>
       <div className="relative h-4 w-full">
         {dividers.map((d) => {
@@ -510,6 +486,36 @@ function PlayerOutcomeCard({ entry }: { entry: RemainingPlayerAnalysis }) {
                   : undefined,
               }}
             />
+          );
+        })}
+      </div>
+      <div className="flex flex-wrap justify-center gap-1">
+        {entry.leagues.map((l, i) => {
+          // Red/green here is reserved for ONE thing: the win/loss border
+          // from the legend selection. Role identity (your starter vs.
+          // opponent's) is carried entirely by the ↑/↓ glyph, with plain
+          // neutral text — coloring the text red/green by role too would
+          // have it fighting the border's red/green for the same two
+          // colors, so a green-text/red-border (or vice versa) badge read
+          // as contradictory instead of as two separate facts.
+          // Same CSS vars as the chart/legend (not a separate Tailwind
+          // class) so this can never drift out of sync with whatever
+          // win/loss color those are set to.
+          const borderColor = !selectedCombo
+            ? "var(--color-border)"
+            : selectedCombo[i]
+            ? "var(--color-outcome-win)"
+            : "var(--color-outcome-loss)";
+          return (
+            <span
+              key={l.leagueId}
+              title={l.description}
+              className="inline-flex items-center gap-0.5 rounded-full border px-1.5 py-0.5 text-[10px] font-semibold text-foreground transition-colors"
+              style={{ borderColor }}
+            >
+              <span aria-hidden="true">{l.role === "your-starter" ? "↑" : "↓"}</span>
+              {l.leagueName}
+            </span>
           );
         })}
       </div>

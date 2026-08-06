@@ -391,6 +391,19 @@ function computeRecordBands(
   }
 
   const raw: { min: number; max: number | null; wins: number; losses: number }[] = [];
+  // The loop below only ever tests points AT OR ABOVE points[0] — fine when
+  // 0 (the seeded floor) happens to be the smallest threshold, since a
+  // normal player's score can't go below that anyway, but silently wrong
+  // the moment a real threshold is negative (a defense's -4, say): that
+  // threshold becomes points[0], and whatever the record is for scores
+  // BELOW it — a real, different outcome — never gets computed at all, so
+  // the line renders as one uniform color with no threshold effect visible.
+  // -Infinity here always clamps correctly wherever the domain's own min
+  // ends up (see pct() at the call site), and merges away into the next
+  // band below when it turns out to share the same record (the ordinary
+  // positive-threshold case).
+  const leadingTestScore = points[0] - Math.max(1, Math.abs(points[0]) * 0.1);
+  raw.push({ min: -Infinity, max: points[0], ...outcomeAt(leadingTestScore) });
   for (let i = 0; i < points.length; i++) {
     const min = points[i];
     const max = i + 1 < points.length ? points[i + 1] : null;
@@ -733,6 +746,17 @@ export function analyzeCrossLeague(
 
   // Collect all remaining starters that appear in a meaningful role
   const remainingByPlayer = new Map<string, RemainingPlayerAnalysis>();
+  // A real player's actual points can differ across leagues (PPR vs.
+  // standard, different bonus rules) — currentPoints (used to place the
+  // dot on the chart) is the average across every league they appear in,
+  // not whichever single league's number happened to be seen last/highest.
+  const currentPointsSum = new Map<string, { sum: number; count: number }>();
+  function trackCurrentPoints(key: string, points: number) {
+    const stats = currentPointsSum.get(key) ?? { sum: 0, count: 0 };
+    stats.sum += points;
+    stats.count += 1;
+    currentPointsSum.set(key, stats);
+  }
 
   for (const { leagueId, leagueName, platform, matchup } of matchupResults) {
     if (!matchup || !matchup.opponent) continue;
@@ -809,9 +833,10 @@ export function analyzeCrossLeague(
         };
         remainingByPlayer.set(key, entry);
       }
-      // Update to highest projection/current-points seen
+      // Update to highest projection seen; currentPoints is finalized as an
+      // average below, once every league's appearance has been tracked.
       if (pContribution > entry.projectedPoints) entry.projectedPoints = pContribution;
-      if ((player.points ?? 0) > entry.currentPoints) entry.currentPoints = player.points ?? 0;
+      trackCurrentPoints(key, player.points ?? 0);
       entry.status = derivedStatus;
 
       entry.leagues.push({
@@ -881,7 +906,7 @@ export function analyzeCrossLeague(
           remainingByPlayer.set(key, entry);
         }
         if (pContribution > entry.projectedPoints) entry.projectedPoints = pContribution;
-        if ((player.points ?? 0) > entry.currentPoints) entry.currentPoints = player.points ?? 0;
+        trackCurrentPoints(key, player.points ?? 0);
         entry.status = derivedStatus;
 
         entry.leagues.push({
@@ -910,6 +935,9 @@ export function analyzeCrossLeague(
 
     entry.hasConflict = yourLeagues.length > 0 && oppLeagues.length > 0;
     entry.category = entry.hasConflict ? "mix" : yourLeagues.length > 0 ? "mine" : "opponents";
+
+    const cpStats = currentPointsSum.get(entry.playerId);
+    entry.currentPoints = cpStats ? cpStats.sum / cpStats.count : 0;
 
     if (entry.hasConflict) {
       // Sweet spot is actionable guidance ("what should this player do from
