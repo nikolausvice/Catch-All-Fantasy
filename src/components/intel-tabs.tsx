@@ -32,7 +32,7 @@ export function IntelTabs({
           leaving the page's side margins see-through. */}
       <div
         id="app-tabs"
-        className="sticky z-10 -mx-4 border-b border-border bg-background px-4 py-3"
+        className="sticky z-10 -mx-4 border-b border-border bg-background px-4 py-2"
         style={{ top: "var(--site-header-height, 69px)" }}
       >
         <ElementHeightVar selector="#app-tabs" varName="--tabs-height" />

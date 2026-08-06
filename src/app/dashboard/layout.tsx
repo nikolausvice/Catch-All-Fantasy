@@ -4,7 +4,6 @@ import { eq, and } from "drizzle-orm";
 import { auth } from "@/auth";
 import { db } from "@/db/client";
 import { platformIdentities } from "@/db/schema";
-import { AddLeagueButton } from "@/components/add-league-button";
 import { ElementHeightVar } from "@/components/element-height-var";
 import { RefreshButton } from "@/components/refresh-button";
 import { SiteFooter } from "@/components/site-footer";
@@ -46,13 +45,16 @@ export default async function DashboardLayout({
             Catch All Fantasy
           </Link>
           <div className="flex flex-wrap items-center justify-center gap-2 sm:justify-start sm:gap-3">
-            <AddLeagueButton hasStoredEspnCookies={!!espnIdentity} />
             <RefreshButton />
-            <UserMenu />
+            <UserMenu hasStoredEspnCookies={!!espnIdentity} />
           </div>
         </div>
       </header>
-      <main className="mx-auto w-full max-w-5xl flex-1 px-4 py-6 sm:py-8">
+      {/* pt trimmed well below pb — the tab bar right below this has its
+          own py-3, so a full py-6/py-8 top padding here on top of that
+          stacked into a noticeably bigger gap above the tabs than below
+          any other section. */}
+      <main className="mx-auto w-full max-w-5xl flex-1 px-4 pb-6 pt-4 sm:pb-8 sm:pt-4">
         {children}
       </main>
       <SiteFooter />

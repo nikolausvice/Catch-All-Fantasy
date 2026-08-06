@@ -5,13 +5,31 @@ import { createPortal } from "react-dom";
 import { AddLeagueSection } from "./add-league-section";
 import { headerButtonClass } from "@/lib/utils";
 
-export function AddLeagueButton({ hasStoredEspnCookies }: { hasStoredEspnCookies: boolean }) {
+export function AddLeagueButton({
+  hasStoredEspnCookies,
+  className = headerButtonClass,
+  label = "+ Add league",
+}: {
+  hasStoredEspnCookies: boolean;
+  /** Lets the same self-contained trigger+modal be dropped into a header
+   * button, a dropdown-menu row, or a big empty-state CTA, without three
+   * copies of the modal/portal/escape-key logic to keep in sync. */
+  className?: string;
+  label?: string;
+}) {
   const [open, setOpen] = useState(false);
   // Portals can't render on the server (no document there), so wait for the
   // client mount before creating one — matches server and first client
   // render, then swaps in.
   const [mounted, setMounted] = useState(false);
-  useEffect(() => setMounted(true), []);
+  useEffect(() => {
+    // Deferred to a microtask rather than called directly in the effect
+    // body — still fires before the next paint, just not synchronously
+    // within the effect itself (which react-hooks/set-state-in-effect flags
+    // as a cascading-render risk even though there's nothing to cascade
+    // here: the state literally can't be known any earlier than "mounted").
+    queueMicrotask(() => setMounted(true));
+  }, []);
 
   // A `click` event's target is resolved from where the mouse is *released*,
   // not where it went down. Selecting text inside the modal and dragging
@@ -64,8 +82,8 @@ export function AddLeagueButton({ hasStoredEspnCookies }: { hasStoredEspnCookies
 
   return (
     <>
-      <button type="button" onClick={() => setOpen(true)} className={headerButtonClass}>
-        + Add league
+      <button type="button" onClick={() => setOpen(true)} className={className}>
+        {label}
       </button>
       {mounted ? createPortal(modal, document.body) : null}
     </>

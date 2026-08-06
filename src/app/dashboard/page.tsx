@@ -4,13 +4,14 @@ import { and, desc, eq } from "drizzle-orm";
 import { auth } from "@/auth";
 import { db } from "@/db/client";
 import { connectedLeagues, platformIdentities } from "@/db/schema";
+import { AddLeagueButton } from "@/components/add-league-button";
 import { AnalysisSection, WinScenariosSection } from "@/components/analysis-section";
 import { AvatarImage } from "@/components/avatar-image";
 import { IntelTabs } from "@/components/intel-tabs";
 import { RemoveLeagueButton } from "@/components/remove-league-button";
 import { VennExplorer } from "@/components/venn-diagram";
 import type { VennComboInfo, VennSetInfo } from "@/components/venn-diagram";
-import { analyzeCrossLeague } from "@/lib/leagues/cross-league";
+import { analyzeCrossLeague, isRemaining } from "@/lib/leagues/cross-league";
 import { getNflGameStatuses, type GameStatus } from "@/lib/leagues/nfl-schedule";
 import {
   buildRosterSets,
@@ -112,12 +113,19 @@ function TeamRow({
   score,
   projectedScore,
   isBye,
+  scoreStatus,
 }: {
   name: string;
   avatarUrl: string | null;
   score: number | null;
   projectedScore?: number;
   isBye?: boolean;
+  /** Colors the score green when this team currently leads, red when
+   * behind — same win/loss colors as the Outcomes tab, so "ahead" reads the
+   * same way everywhere. undefined (a tie, or no opponent to compare to)
+   * leaves the score in the plain default color; neither side is "ahead"
+   * of a tie. */
+  scoreStatus?: "ahead" | "behind";
 }) {
   return (
     <div className="flex items-center justify-between gap-3">
@@ -149,6 +157,13 @@ function TeamRow({
         className={`shrink-0 text-2xl font-bold tabular-nums ${
           isBye ? "text-muted-foreground/40" : ""
         }`}
+        style={
+          scoreStatus === "ahead"
+            ? { color: "var(--color-outcome-win)" }
+            : scoreStatus === "behind"
+            ? { color: "var(--color-outcome-loss)" }
+            : undefined
+        }
       >
         {score != null ? score.toFixed(1) : "–"}
       </p>
@@ -160,10 +175,12 @@ function MatchupCard({
   league,
   matchup,
   error,
+  statusByTeam,
 }: {
   league: LeagueRow;
   matchup: LeagueMatchup | null;
   error: string | null;
+  statusByTeam: Map<string, GameStatus>;
 }) {
   if (error) {
     return (
@@ -191,6 +208,29 @@ function MatchupCard({
 
   if (!matchup) return null;
 
+  // Demo leagues are hand-typed fake data — a real NFL team's live game
+  // status shouldn't override a score the user typed in by hand, same
+  // exception cross-league.ts makes everywhere else it reads this map.
+  const status = league.platform === "demo" ? undefined : statusByTeam;
+  const remainingCount =
+    matchup.team.players.filter((p) => isRemaining(p, status)).length +
+    (matchup.opponent?.players.filter((p) => isRemaining(p, status)).length ?? 0);
+
+  // Only meaningful with a real opponent and two real scores to compare —
+  // a bye, or a score not yet reported by the platform, is neither "ahead"
+  // nor "behind" anything.
+  let teamStatus: "ahead" | "behind" | undefined;
+  let opponentStatus: "ahead" | "behind" | undefined;
+  if (matchup.opponent && matchup.teamScore != null && matchup.opponentScore != null) {
+    if (matchup.teamScore > matchup.opponentScore) {
+      teamStatus = "ahead";
+      opponentStatus = "behind";
+    } else if (matchup.teamScore < matchup.opponentScore) {
+      teamStatus = "behind";
+      opponentStatus = "ahead";
+    }
+  }
+
   return (
     <Link
       href={`/dashboard/leagues/${league.id}`}
@@ -209,6 +249,7 @@ function MatchupCard({
         avatarUrl={matchup.team.avatarUrl}
         score={matchup.teamScore}
         projectedScore={matchup.teamProjectedScore}
+        scoreStatus={teamStatus}
       />
 
       <div className="my-2 flex items-center gap-2">
@@ -223,9 +264,18 @@ function MatchupCard({
           avatarUrl={matchup.opponent.avatarUrl}
           score={matchup.opponentScore}
           projectedScore={matchup.opponentProjectedScore}
+          scoreStatus={opponentStatus}
         />
       ) : (
         <TeamRow name="Bye" avatarUrl={null} score={null} isBye />
+      )}
+
+      {matchup.opponent && (
+        <p className="mt-3 text-center text-[11px] text-muted-foreground">
+          {remainingCount === 0
+            ? "All players have finished"
+            : `${remainingCount} player${remainingCount === 1 ? "" : "s"} left to play`}
+        </p>
       )}
     </Link>
   );
@@ -235,10 +285,12 @@ function MatchupsTab({
   needsSetup,
   needsReconnectIds,
   matchups,
+  statusByTeam,
 }: {
   needsSetup: LeagueRow[];
   needsReconnectIds: Set<string>;
   matchups: { league: LeagueRow; matchup: LeagueMatchup | null; error: string | null }[];
+  statusByTeam: Map<string, GameStatus>;
 }) {
   return (
     <Fragment key="matchups">
@@ -294,21 +346,21 @@ function MatchupsTab({
           <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
             This week
           </h2>
-          <ul className="flex flex-col gap-3">
+          <ul className="grid gap-3 sm:grid-cols-2">
             {matchups.map(({ league, matchup, error }) => (
               <li key={league.id}>
-                <MatchupCard league={league} matchup={matchup} error={error} />
+                <MatchupCard
+                  league={league}
+                  matchup={matchup}
+                  error={error}
+                  statusByTeam={statusByTeam}
+                />
               </li>
             ))}
           </ul>
         </section>
       )}
 
-      {needsSetup.length === 0 && matchups.length === 0 && (
-        <p className="rounded-xl border border-dashed border-border p-8 text-center text-sm text-muted-foreground">
-          No leagues connected yet. Add one above to get started.
-        </p>
-      )}
     </Fragment>
   );
 }
@@ -375,8 +427,13 @@ export default async function DashboardPage() {
   return (
     <div className="flex flex-col gap-6">
       {leagues.length === 0 ? (
-        <div className="rounded-xl border border-dashed border-border p-8 text-center text-sm text-muted-foreground">
-          No leagues connected yet. Add one above to get started.
+        <div className="flex flex-col items-center gap-4 rounded-xl border border-dashed border-border p-8 text-center">
+          <p className="text-sm text-muted-foreground">No leagues connected yet.</p>
+          <AddLeagueButton
+            hasStoredEspnCookies={espnIdentities.length > 0}
+            label="+ Add your first league"
+            className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:opacity-90"
+          />
         </div>
       ) : (
         <IntelTabs
@@ -389,6 +446,7 @@ export default async function DashboardPage() {
                 needsSetup={needsSetup}
                 needsReconnectIds={needsReconnectIds}
                 matchups={matchups}
+                statusByTeam={statusByTeam}
               />
             </Fragment>
           }

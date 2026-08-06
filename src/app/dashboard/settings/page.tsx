@@ -2,6 +2,7 @@ import Link from "next/link";
 import { and, eq } from "drizzle-orm";
 import { db } from "@/db/client";
 import { connectedLeagues, platformIdentities } from "@/db/schema";
+import { DeleteAccountButton } from "@/components/delete-account-button";
 import { EspnIdentityManager, type EspnIdentitySummary } from "@/components/espn-identity-manager";
 import { RemoveLeagueButton } from "@/components/remove-league-button";
 import { requireSessionUserId, STALE_SESSION_MESSAGE } from "@/lib/auth/require-user";
@@ -89,6 +90,19 @@ export default async function SettingsPage() {
             ))}
           </ul>
         )}
+      </section>
+
+      <section className="flex flex-col gap-3 rounded-lg border border-destructive/30 p-4">
+        <div>
+          <h2 className="text-lg font-semibold text-destructive">Danger zone</h2>
+          <p className="text-sm text-muted-foreground">
+            Permanently delete your account, every connected league, and every saved login.
+            This can&apos;t be undone.
+          </p>
+        </div>
+        <div>
+          <DeleteAccountButton />
+        </div>
       </section>
     </div>
   );

@@ -2,9 +2,9 @@
 
 import { and, eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
-import { auth } from "@/auth";
+import { auth, signOut } from "@/auth";
 import { db } from "@/db/client";
-import { connectedLeagues, platformIdentities } from "@/db/schema";
+import { connectedLeagues, platformIdentities, users } from "@/db/schema";
 import { encryptSecret, tryDecryptSecret } from "@/lib/crypto/secrets";
 import { EspnApiError, getEspnLeagueInfo, getEspnLeaguesForCookies } from "@/lib/espn/client";
 import { requireSessionUserId, STALE_SESSION_MESSAGE } from "@/lib/auth/require-user";
@@ -501,4 +501,20 @@ export async function removeConnectedLeague(leagueRowId: string) {
     );
   revalidatePath("/dashboard");
   revalidatePath("/dashboard/settings");
+}
+
+/**
+ * Deletes the account outright — every table with a userId column cascades
+ * off users.id (see schema.ts), so this one delete takes the leagues,
+ * platform logins, and score overrides with it. Signs out in the same
+ * action (rather than letting the now-stale session fall through to the
+ * requireSessionUserId check elsewhere) so the redirect goes straight to a
+ * clean state instead of bouncing through /clear-session.
+ */
+export async function deleteAccount() {
+  const userId = await requireSessionUserId();
+  if (!userId) return;
+
+  await db.delete(users).where(eq(users.id, userId));
+  await signOut({ redirectTo: "/" });
 }

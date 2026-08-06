@@ -655,16 +655,131 @@ export function WinScenariosSection({
   );
 }
 
+/** A short stretch of chart line with a single exact white bar partway
+ * along it — the same shape a card's own line/bar renders, just standing
+ * alone as a small illustration rather than describing it in words only. */
+function ExactBarVisual() {
+  return (
+    <svg viewBox="0 0 100 10" className="h-3 w-20 shrink-0 overflow-visible" aria-hidden="true">
+      <line x1={0} y1={5} x2={45} y2={5} stroke={CARD_LOSS_COLOR} strokeWidth={1.5} vectorEffect="non-scaling-stroke" />
+      <line x1={45} y1={5} x2={100} y2={5} stroke={CARD_WIN_COLOR} strokeWidth={1.5} vectorEffect="non-scaling-stroke" />
+      <line
+        x1={45}
+        y1={0}
+        x2={45}
+        y2={10}
+        stroke="white"
+        strokeWidth={1.5}
+        vectorEffect="non-scaling-stroke"
+      />
+    </svg>
+  );
+}
+
+/** Same idea, but a wider uncertain box (with its diagonal stripe) in place
+ * of the single bar — the other real shape a card's line can show. */
+function UncertainBoxVisual() {
+  return (
+    <svg viewBox="0 0 100 10" className="h-3 w-20 shrink-0 overflow-visible" aria-hidden="true">
+      <defs>
+        <pattern id="how-it-works-stripe" width={2.4} height={2.4} patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+          <rect x={0} width={1.2} height={2.4} fill={CARD_LOSS_COLOR} />
+          <rect x={1.2} width={1.2} height={2.4} fill={CARD_WIN_COLOR} />
+        </pattern>
+      </defs>
+      <line x1={0} y1={5} x2={38} y2={5} stroke={CARD_LOSS_COLOR} strokeWidth={1.5} vectorEffect="non-scaling-stroke" />
+      <line x1={62} y1={5} x2={100} y2={5} stroke={CARD_WIN_COLOR} strokeWidth={1.5} vectorEffect="non-scaling-stroke" />
+      <rect x={38} y={4.4} width={24} height={1.2} fill="url(#how-it-works-stripe)" />
+      <rect
+        x={38}
+        y={0.5}
+        width={24}
+        height={9}
+        fill="none"
+        stroke="white"
+        strokeWidth={1.5}
+        vectorEffect="non-scaling-stroke"
+      />
+    </svg>
+  );
+}
+
+/** Collapsed by default so it doesn't compete with the cards themselves. */
+function HowItWorksGuide() {
+  return (
+    <details className="group rounded-xl border border-border bg-card p-4 text-sm">
+      <summary className="flex cursor-pointer items-center justify-between gap-2 font-semibold [&::-webkit-details-marker]:hidden">
+        How this page works
+        <span className="text-muted-foreground transition-transform group-open:rotate-180">▾</span>
+      </summary>
+      <div className="mt-4 flex flex-col gap-4 text-muted-foreground">
+        <div>
+          <p className="font-medium text-foreground">Overlap &amp; conflicts</p>
+          <p className="mt-1">
+            The same player can show up in more than one of your leagues, either as your starter
+            in one or an opponent&apos;s in another. Rooting for a big game from them
+            can help one league while hurting another.
+          </p>
+        </div>
+        <div>
+          <p className="font-medium text-foreground">The threshold</p>
+          <p className="mt-1">
+            For each league on the card, there&apos;s a break-even point: the score this player
+            needs (or needs to stay under, if they&apos;re an opponent&apos;s starter) for that
+            league to flip to a win.
+          </p>
+        </div>
+        <div className="flex flex-col gap-2">
+          <p className="font-medium text-foreground">Uncertainty</p>
+          <div className="flex items-center gap-3">
+            <ExactBarVisual />
+            <p>
+              A plain bar means the threshold is exact — nothing else left in that league could
+              still move it.
+            </p>
+          </div>
+          <div className="flex items-center gap-3">
+            <UncertainBoxVisual />
+            <p>
+              A wider, striped box means other starters (on either side) are still live, and
+              their own variance could still shift where the real threshold lands.
+            </p>
+          </div>
+        </div>
+        <div>
+          <p className="font-medium text-foreground">The legend</p>
+          <p className="mt-1">
+            The colored squares under a card&apos;s chart are its distinct win/loss combinations.
+            Click one to see exactly what it means: the league chips below border green for the
+            leagues it wins and red for the leagues it loses.
+          </p>
+        </div>
+        <div>
+          <p className="font-medium text-foreground">The score chip &amp; league chips</p>
+          <p className="mt-1">
+            The number under each player&apos;s name is their current score — averaged if the
+            same real player scores differently across leagues (different scoring settings).
+            League chips are clickable and jump straight to that league&apos;s matchup.
+          </p>
+        </div>
+      </div>
+    </details>
+  );
+}
+
 function PlayerOutcomesSection({
   players,
 }: {
   players: RemainingPlayerAnalysis[];
 }) {
   return (
-    <div className="grid gap-3 sm:grid-cols-2">
-      {players.map((entry) => (
-        <PlayerOutcomeCard key={entry.playerId} entry={entry} />
-      ))}
+    <div className="flex flex-col gap-4">
+      <HowItWorksGuide />
+      <div className="grid gap-3 sm:grid-cols-2">
+        {players.map((entry) => (
+          <PlayerOutcomeCard key={entry.playerId} entry={entry} />
+        ))}
+      </div>
     </div>
   );
 }

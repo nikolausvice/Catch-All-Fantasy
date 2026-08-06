@@ -328,7 +328,7 @@ function derivedPlayerStatus(
  * zero-points proxy when no status is available at all (e.g. a demo player
  * with no override, or a schedule lookup miss).
  */
-function isRemaining(p: LeagueTeamPlayer, statusByTeam?: Map<string, GameStatus>): boolean {
+export function isRemaining(p: LeagueTeamPlayer, statusByTeam?: Map<string, GameStatus>): boolean {
   if (!p.isStarter) return false;
   const status = resolveGameStatus(p, statusByTeam);
   if (status === "post") return false;
