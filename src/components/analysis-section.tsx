@@ -1,8 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import type { CrossLeagueAnalysis, RemainingPlayerAnalysis } from "@/lib/leagues/cross-league";
-import type { GameStatus } from "@/lib/leagues/nfl-schedule";
 
 /**
  * Wins → red (bad) / green (good) — used only for the aggregate win-count
@@ -171,15 +170,29 @@ function computePlayerDomain(
   const pending = entry.leagues.filter(
     (l) => !l.resolved && (allowNegativeDisplay || (l.breakEvenPoints ?? 0) >= 0),
   );
+  const breakEvens = pending.map((l) => l.breakEvenPoints ?? 0);
+
   let min = 0;
-  for (const l of pending) min = Math.min(min, l.breakEvenPoints ?? 0);
-  const max = Math.max(
-    10,
-    ...pending.map((l) => l.breakEvenPoints ?? 0),
-    entry.projectedPoints * 1.1,
-    entry.currentPoints + 4,
-  );
-  return { min, max: max > min ? max : min + 10 };
+  for (const be of breakEvens) min = Math.min(min, be);
+  let max = Math.max(10, ...breakEvens, entry.projectedPoints * 1.1, entry.currentPoints + 4);
+  if (max <= min) max = min + 10;
+
+  // Pad — but ONLY the side that actually needs it, and only when it
+  // actually needs it. If the highest/lowest threshold IS the domain's own
+  // max/min (no natural headroom from the projection/current-points margins
+  // above), the color band beyond it would be computed correctly but have
+  // zero pixels left to draw in. A player with no pending threshold at all
+  // (nothing above beyond the flat `10` floor) has nothing at risk of that
+  // collision, so it's left untouched — padding both ends unconditionally
+  // for every card meant a threshold-free card got an arbitrary gap it
+  // never needed, at the exact "start of the line" where nothing was ever
+  // wrong to begin with.
+  if (breakEvens.length > 0) {
+    const pad = Math.max((max - min) * 0.12, 3);
+    if (Math.max(...breakEvens) >= max) max += pad;
+    if (Math.min(...breakEvens) <= min) min -= pad;
+  }
+  return { min, max };
 }
 
 function PlayerOutcomeCard({ entry }: { entry: RemainingPlayerAnalysis }) {
@@ -504,18 +517,6 @@ function PlayerOutcomeCard({ entry }: { entry: RemainingPlayerAnalysis }) {
   );
 }
 
-const CATEGORY_FILTERS: { key: RemainingPlayerAnalysis["category"]; label: string }[] = [
-  { key: "mine", label: "My Leagues" },
-  { key: "opponents", label: "Opponents" },
-  { key: "mix", label: "Mix" },
-];
-
-const STATUS_FILTERS: { key: GameStatus; label: string }[] = [
-  { key: "in", label: "Playing" },
-  { key: "post", label: "Final" },
-  { key: "pre", label: "Pregame" },
-];
-
 function FilterPill({
   isActive,
   onClick,
@@ -548,64 +549,72 @@ function PlayerOutcomesSection({
   players: RemainingPlayerAnalysis[];
   winCountDistribution: number[] | null;
 }) {
-  // Every remaining starter, for or against, in one league or several — not
-  // just the ones in conflict — split into three role-mix views rather than
-  // shown all at once, since a "mine"-only player's card (no trade-off to
-  // weigh) and a "mix" player's card (a real trade-off) answer different
-  // questions and don't belong side by side by default.
-  const [category, setCategory] = useState<RemainingPlayerAnalysis["category"]>("mix");
-  // Status is a separate, independently-toggleable dimension (not one-of-
-  // three like category) — you might want "Playing + Final" together to
-  // hide the ones you can't act on yet, or just "Playing" alone. All three
-  // start selected so this filter has no effect until you narrow it.
-  const [statuses, setStatuses] = useState<Set<GameStatus>>(
-    () => new Set(STATUS_FILTERS.map((f) => f.key)),
+  // Every distinct league that appears across these players, in first-seen
+  // order — computed from the data itself rather than a fixed list, since
+  // which leagues exist is different for every user.
+  const leagueOptions = useMemo(() => {
+    const seen = new Map<string, string>();
+    for (const p of players) {
+      for (const l of p.leagues) {
+        if (!seen.has(l.leagueId)) seen.set(l.leagueId, l.leagueName);
+      }
+    }
+    return [...seen.entries()].map(([leagueId, leagueName]) => ({ leagueId, leagueName }));
+  }, [players]);
+
+  // Independently toggleable, not one-of-N — a player showing up in ANY
+  // selected league stays visible, since a "mix" player by definition spans
+  // more than one league and narrowing to just one shouldn't hide them
+  // entirely. Starts with every league selected so the filter has no effect
+  // until you narrow it.
+  const [selectedLeagues, setSelectedLeagues] = useState<Set<string>>(
+    () => new Set(leagueOptions.map((l) => l.leagueId)),
   );
-  function toggleStatus(key: GameStatus) {
-    setStatuses((prev) => {
+  function toggleLeague(id: string) {
+    setSelectedLeagues((prev) => {
       const next = new Set(prev);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
       return next;
     });
   }
 
-  const filtered = players.filter((p) => p.category === category && statuses.has(p.status));
+  const filtered = players.filter((p) => p.leagues.some((l) => selectedLeagues.has(l.leagueId)));
 
   return (
     <div className="flex flex-col gap-4">
-      {/* Sticky: this header (title, win-count histogram, both filter rows)
+      {/* Sticky: this header (title, win-count histogram, league filter)
           stays on screen while the card grid below it scrolls underneath —
           the histogram and filters are exactly what you want visible while
           scanning a long list of players, not something to scroll past.
-          top-[92px]/sm:top-[72px] approximates the site header's own height
-          (it's a responsive two-row/one-row header, not a fixed size) so
-          this sticks right underneath it rather than sliding under/over. */}
-      <div className="sticky top-[92px] z-[5] -mx-4 flex flex-col gap-3 bg-background px-4 pb-3 pt-1 sm:top-[72px]">
+          Stacks right below the (also sticky) tab bar, which is right below
+          the (also sticky) site header — both heights are measured live via
+          ElementHeightVar, not guessed, so this can't drift out of
+          alignment the way a hardcoded pixel offset would the moment either
+          one's actual height changes. */}
+      <div
+        className="sticky z-[5] -mx-4 flex flex-col gap-3 bg-background px-4 pb-3 pt-3"
+        style={{ top: "calc(var(--site-header-height, 69px) + var(--tabs-height, 64px))" }}
+      >
         <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
           Win scenarios
         </h2>
         {winCountDistribution && <WinDistribution distribution={winCountDistribution} />}
-        <div className="flex flex-col gap-1.5">
-          <div className="flex flex-wrap gap-1.5">
-            {CATEGORY_FILTERS.map((f) => (
-              <FilterPill key={f.key} isActive={category === f.key} onClick={() => setCategory(f.key)}>
-                {f.label}
-              </FilterPill>
-            ))}
-          </div>
-          <div className="flex flex-wrap gap-1.5">
-            {STATUS_FILTERS.map((f) => (
-              <FilterPill key={f.key} isActive={statuses.has(f.key)} onClick={() => toggleStatus(f.key)}>
-                {f.label}
-              </FilterPill>
-            ))}
-          </div>
+        <div className="flex flex-wrap gap-1.5">
+          {leagueOptions.map((l) => (
+            <FilterPill
+              key={l.leagueId}
+              isActive={selectedLeagues.has(l.leagueId)}
+              onClick={() => toggleLeague(l.leagueId)}
+            >
+              {l.leagueName}
+            </FilterPill>
+          ))}
         </div>
       </div>
       {filtered.length === 0 ? (
         <p className="rounded-xl border border-dashed border-border p-6 text-center text-sm text-muted-foreground">
-          No remaining players match these filters.
+          No remaining players in the selected leagues.
         </p>
       ) : (
         <div className="grid gap-3 sm:grid-cols-2">

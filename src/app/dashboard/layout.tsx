@@ -5,6 +5,7 @@ import { auth } from "@/auth";
 import { db } from "@/db/client";
 import { platformIdentities } from "@/db/schema";
 import { AddLeagueButton } from "@/components/add-league-button";
+import { ElementHeightVar } from "@/components/element-height-var";
 import { RefreshButton } from "@/components/refresh-button";
 import { SiteFooter } from "@/components/site-footer";
 import { UserMenu } from "@/components/user-menu";
@@ -34,7 +35,12 @@ export default async function DashboardLayout({
 
   return (
     <div className="flex min-h-screen flex-col">
-      <header className="sticky top-0 z-10 border-b border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80">
+      {/* Solid, not translucent — a blurred/semi-transparent header lets
+          whatever's scrolling underneath show through as ghosting the
+          instant it passes beneath, which reads as a rendering glitch
+          rather than an intentional effect. */}
+      <header id="site-header" className="sticky top-0 z-20 border-b border-border bg-background">
+        <ElementHeightVar selector="#site-header" varName="--site-header-height" />
         <div className="mx-auto flex max-w-5xl flex-col items-center gap-2 px-4 py-3 sm:flex-row sm:justify-between sm:py-4">
           <Link href="/dashboard" className="font-semibold tracking-tight">
             Catch All Fantasy

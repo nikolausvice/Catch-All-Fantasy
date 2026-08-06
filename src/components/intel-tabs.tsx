@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { ElementHeightVar } from "@/components/element-height-var";
 
 const TABS = [
   { key: "overview", label: "Overview" },
@@ -23,22 +24,35 @@ export function IntelTabs({
 
   return (
     <div className="flex flex-col gap-5">
-      <div className="flex justify-center">
-        <div className="flex gap-1 overflow-x-auto rounded-lg border border-border bg-muted/40 p-1">
-          {TABS.map((tab) => (
-            <button
-              key={tab.key}
-              type="button"
-              onClick={() => setActive(tab.key)}
-              className={`flex shrink-0 items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
-                active === tab.key
-                  ? "bg-card text-foreground shadow-sm"
-                  : "text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              {tab.label}
-            </button>
-          ))}
+      {/* Sticky, stacked right below the site header (--site-header-height
+          is measured live, not guessed — see ElementHeightVar) — losing the
+          tabs the moment you scroll meant scrolling back to the top just to
+          switch views. -mx-4/px-4 cancels out <main>'s own horizontal
+          padding so the solid background spans edge to edge instead of
+          leaving the page's side margins see-through. */}
+      <div
+        id="app-tabs"
+        className="sticky z-10 -mx-4 border-b border-border bg-background px-4 py-3"
+        style={{ top: "var(--site-header-height, 69px)" }}
+      >
+        <ElementHeightVar selector="#app-tabs" varName="--tabs-height" />
+        <div className="flex justify-center">
+          <div className="flex gap-1 overflow-x-auto rounded-lg border border-border bg-muted/40 p-1">
+            {TABS.map((tab) => (
+              <button
+                key={tab.key}
+                type="button"
+                onClick={() => setActive(tab.key)}
+                className={`flex shrink-0 items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
+                  active === tab.key
+                    ? "bg-card text-foreground shadow-sm"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
