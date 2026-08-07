@@ -346,9 +346,19 @@ export function isRemaining(p: LeagueTeamPlayer, statusByTeam?: Map<string, Game
   // zero (a data-availability quirk, not a real "already resolved" state).
   if (status === "pre" || status === "in") return true;
   // No status at all — team is on a bye, the lookup missed, or (for demo)
-  // no override was set. Fall through to the proxy, which has no
-  // definitive status to lean on.
-  return (p.points ?? 0) === 0 && (p.projectedPoints ?? 0) > 0;
+  // no override was set. Zero points with nothing else to go on reads as
+  // "hasn't played yet" rather than "played and scored nothing" — the
+  // safer assumption when it's genuinely ambiguous, since treating a
+  // still-pending player as already resolved silently drops or wrongly
+  // finalizes a real, still-actionable threshold. This used to also
+  // require a nonzero projectedPoints as corroborating evidence, but
+  // kickers (and other positions several platforms don't bother
+  // projecting) then had NOTHING to corroborate with and always fell to
+  // "resolved" even before their game started — the exact bug this was
+  // meant to avoid, just for a position whose projection happens to be
+  // missing instead of a status lookup miss. A nonzero score is its own
+  // real signal regardless of projection data, so that case is unaffected.
+  return (p.points ?? 0) === 0;
 }
 
 /**

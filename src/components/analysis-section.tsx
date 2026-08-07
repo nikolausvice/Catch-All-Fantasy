@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import type { CrossLeagueAnalysis, RemainingPlayerAnalysis } from "@/lib/leagues/cross-league";
+import type { GameStatus } from "@/lib/leagues/nfl-schedule";
 
 /**
  * Eight basic colors, Outcomes-tab-only (WinDistribution/bandColor below
@@ -848,29 +849,84 @@ function HowItWorksGuide() {
   );
 }
 
+const STATUS_FILTERS: { key: GameStatus; label: string }[] = [
+  { key: "pre", label: "Yet to Play" },
+  { key: "in", label: "Live" },
+  { key: "post", label: "Final" },
+];
+
 function PlayerOutcomesSection({
   players,
 }: {
   players: RemainingPlayerAnalysis[];
 }) {
   const [search, setSearch] = useState("");
-  const visible = search
-    ? players.filter((p) => p.name.toLowerCase().includes(search.toLowerCase()))
-    : players;
+  // "Yet to Play" default — the pending-decision cards are the ones a
+  // reader actually needs to act/root on right now; already-final ones are
+  // just a record at that point.
+  const [statusFilter, setStatusFilter] = useState<GameStatus>("pre");
+
+  const visible = players.filter((p) => {
+    if (p.status !== statusFilter) return false;
+    if (search && !p.name.toLowerCase().includes(search.toLowerCase())) return false;
+    return true;
+  });
 
   return (
     <div className="flex flex-col gap-4">
       <HowItWorksGuide />
-      <input
-        type="text"
-        value={search}
-        onChange={(e) => setSearch(e.target.value)}
-        placeholder="Search players…"
-        className="rounded-lg border border-border bg-card px-3 py-1.5 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-border"
-      />
+      {/* Sticky right below the app tabs bar (stacking on ITS OWN live
+          --tabs-height/--site-header-height measurements — see
+          ElementHeightVar) — search and the status filter are how you keep
+          finding what you need as you scroll a long players list, so they
+          stay put; the how-it-works guide above is one-time reading, not
+          something you need parked on screen, so it's free to scroll away
+          normally. -mx-4/px-4 cancels this section's ancestors' horizontal
+          padding the same way the tabs bar cancels <main>'s, so the solid
+          background spans edge to edge instead of leaving the page's side
+          margins see-through. */}
+      <div
+        className="sticky z-10 -mx-4 flex flex-col gap-3 border-b border-border bg-background px-4 py-3"
+        style={{ top: "calc(var(--site-header-height, 69px) + var(--tabs-height, 49px))" }}
+      >
+        <input
+          type="text"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search players…"
+          className="rounded-lg border border-border bg-card px-3 py-1.5 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-border"
+        />
+        <div className="flex gap-2">
+          {STATUS_FILTERS.map((f) => (
+            <button
+              key={f.key}
+              type="button"
+              aria-pressed={statusFilter === f.key}
+              onClick={() => setStatusFilter(f.key)}
+              // Same border-outline-not-fill language as the score chip and
+              // the league badges elsewhere on this tab (border-2
+              // border-foreground) — a solid fill flips between a jarring
+              // black-on-white/white-on-black block depending on theme;
+              // a foreground border reads as "selected" just as clearly
+              // without that. border-2 on BOTH states (only the color
+              // changes) so selecting a filter doesn't nudge its neighbors
+              // by the 1px a border-1-to-2 switch would.
+              className={`flex-1 rounded-md border-2 px-3 py-1.5 text-sm font-medium transition-colors ${
+                statusFilter === f.key
+                  ? "border-foreground text-foreground"
+                  : "border-border text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              {f.label}
+            </button>
+          ))}
+        </div>
+      </div>
       {visible.length === 0 ? (
         <p className="rounded-xl border border-dashed border-border p-8 text-center text-sm text-muted-foreground">
-          No players match &quot;{search}&quot;.
+          {search
+            ? `No players match "${search}".`
+            : `No players are ${STATUS_FILTERS.find((f) => f.key === statusFilter)?.label.toLowerCase()}.`}
         </p>
       ) : (
         <div className="grid gap-3 sm:grid-cols-2">
