@@ -36,12 +36,6 @@
   --brand-accent-foreground: #f3f8fb;
   --brand-accent-soft: rgba(29, 78, 107, 0.1);
   --brand-accent-border: rgba(29, 78, 107, 0.3);
-  /* The "White" entry in the player-card mixed-combo palette
-     (MIXED_COMBO_COLORS in analysis-section.tsx) — near-white was picked to
-     read against a dark card, but on a light card it's indistinguishable
-     from the background. A mid slate keeps it a visibly distinct 7th hue
-     in both themes. */
-  --combo-slate: #64748b;
 }
 
 .dark {
@@ -67,7 +61,6 @@
   --brand-accent-foreground: #2b2214;
   --brand-accent-soft: rgba(211, 188, 141, 0.15);
   --brand-accent-border: rgba(211, 188, 141, 0.3);
-  --combo-slate: #f1f5f9;
 }
 
 @theme inline {

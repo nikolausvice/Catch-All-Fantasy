@@ -28,31 +28,48 @@ function bandColor(wins: number, total: number): string {
 }
 
 /**
- * Fixed, ordered hues for a "mixed" combo (some leagues won, some lost) —
- * distinct from CARD_WIN_COLOR/CARD_LOSS_COLOR so a mixed outcome is never
- * mistaken for a clean sweep or a clean shutout. The remaining six of the
- * eight basic colors, ordered to alternate warm/cool (and pair rough
- * complements back-to-back — Blue/Orange, Purple/Yellow) so that whichever
- * two of these end up adjacent on a card, they read as clearly different
- * rather than two nearby shades of the same temperature. Light Blue sits
- * apart from Blue for the same reason: a hue shift toward cyan plus a big
- * jump in lightness, not just "a paler version of the same color." The 7th
- * slot references --combo-slate (globals.css) rather than a fixed hex — a
- * near-white swatch reads fine against a dark card but disappears against
- * a light one, so light mode swaps in a mid slate instead of pure white.
- * Assigned in this order as new combos are first encountered scanning
- * left→right (see computeComboBands); never reused for a different combo
- * within one card. A 7th distinct mixed combo on the same card — rare,
- * needs 3+ pending leagues splitting every possible way — cycles back to
- * Blue rather than growing further.
+ * Fixed hues for a "mixed" combo (some leagues won, some lost) — distinct
+ * from CARD_WIN_COLOR/CARD_LOSS_COLOR so a mixed outcome is never mistaken
+ * for a clean sweep or a clean shutout. Listed in PRIORITY order — a card
+ * with only 1-2 distinct mixed combos uses just the front of this list, and
+ * each later entry is a deliberate fallback for when an earlier one is
+ * already taken (see distinctMixedKeys/colorForKey in computeComboBands).
+ *
+ * The most common case by far is exactly TWO distinct mixed combos (one
+ * pending league splits either way) — e.g. with 2 leagues, "won league A,
+ * lost league B" and "lost league A, won league B" are the only two mixed
+ * outcomes possible, and they're equidistant from a clean loss: nothing
+ * about the sort makes one of them more "loss-adjacent" than the other, so
+ * BOTH of the first two colors need to individually read as clearly apart
+ * from Red, not just the first one:
+ *  1. Blue — the safest possible distance from Red.
+ *  2. Yellow — also far from Red in hue, and Blue/Yellow read as clearly
+ *     different from each other too, so this is the safe pair for the
+ *     common 2-combo case.
+ *  3. Orange — Blue/Orange is a true complementary pair.
+ *  4. Light Blue — a hue shift toward cyan plus a big lightness jump keeps
+ *     it clearly apart from Blue itself, not just "a paler version of the
+ *     same color," and far enough from Green (CARD_WIN_COLOR) to avoid
+ *     reading as a clean win.
+ *  5. Purple — held back from an early slot specifically because it's the
+ *     one hue here with a visible amount of red in it; by 5th priority a
+ *     card needs 5 simultaneous distinct mixed combos, at which point every
+ *     color is sitting next to *something*, so there's no early "always
+ *     safe" slot left to protect.
+ *  6. Pink — last resort, only reached once a card needs a 6th distinct
+ *     mixed combo. Kept last (not e.g. 2nd) specifically so it's very rarely
+ *     shown at all, on top of being a warm rose rather than Red's true red
+ *     so the two don't get confused even when it is.
+ * White/near-white intentionally excluded — it disappears against a light
+ * card background, no matter which mode-aware swatch stands in for it.
  */
 const MIXED_COMBO_COLORS = [
-  "#3B82F6", // Blue
-  "#F97316", // Orange
-  "#A855F7", // Purple
-  "#EAB308", // Yellow
-  "#38BDF8", // Light Blue
-  "var(--combo-slate)", // Slate/white
+  "#3B82F6", // 1. Blue
+  "#EAB308", // 2. Yellow
+  "#F97316", // 3. Orange
+  "#38BDF8", // 4. Light Blue
+  "#A855F7", // 5. Purple
+  "#EC4899", // 6. Pink (last resort)
 ];
 
 /**
@@ -67,13 +84,19 @@ const MIXED_COMBO_COLORS = [
  * result — every league, resolved or pending, gets a boolean in every
  * band's `combo`, ordered to match entry.leagues.
  */
+/** Deterministic function of a combo's own win/loss pattern (reads it as a
+ * binary number, win=1/loss=0) — same combo always hashes the same,
+ * independent of anything about when or where it was encountered. */
+function comboHash(combo: boolean[]): number {
+  let hash = 0;
+  for (const win of combo) hash = hash * 2 + (win ? 1 : 0);
+  return hash;
+}
+
 function computeComboBands(
   entry: RemainingPlayerAnalysis,
 ): { min: number; max: number | null; combo: boolean[]; color: string }[] {
-  const colorForCombo = new Map<string, string>();
-  let nextMixedColor = 0;
-
-  return entry.recordBands.map((band) => {
+  const bands = entry.recordBands.map((band) => {
     // A point safely inside the band, mirroring computeRecordBands' own
     // convention — bands are constructed so the outcome is constant
     // throughout, but evaluating exactly AT an edge is ambiguous when that
@@ -88,20 +111,42 @@ function computeComboBands(
       const breakEven = l.breakEvenPoints ?? 0;
       return l.role === "your-starter" ? testScore >= breakEven : testScore <= breakEven;
     });
+    return { min: band.min, max: band.max, combo };
+  });
 
-    const key = combo.join(",");
-    let color = colorForCombo.get(key);
-    if (!color) {
-      if (combo.every(Boolean)) color = CARD_WIN_COLOR;
-      else if (combo.every((w) => !w)) color = CARD_LOSS_COLOR;
-      else {
-        color = MIXED_COMBO_COLORS[nextMixedColor % MIXED_COMBO_COLORS.length];
-        nextMixedColor++;
-      }
-      colorForCombo.set(key, color);
-    }
+  // Every DISTINCT mixed combo this card actually has (all-true/all-false
+  // always get the fixed win/loss colors, never one of these) — sorted by
+  // comboHash, a value derived purely from the combo's own win/loss
+  // pattern, not from which band happens to come first when scanning
+  // left→right. That sort order is what makes the assignment below stable:
+  // the same real scenario always lands at the same position in this list,
+  // so it always gets the same MIXED_COMBO_COLORS entry, regardless of how
+  // live scores shift which band gets built first on any given refresh.
+  // (comboHash doesn't rank combos by "how close to a clean loss" — with
+  // exactly one pending league, both possible mixed combos have exactly one
+  // win and one loss and are equally close to either extreme, which is
+  // exactly why MIXED_COMBO_COLORS' own first two entries are BOTH chosen
+  // to read clearly apart from Red, not just the very first one.)
+  const distinctMixedKeys = [...new Set(
+    bands
+      .map((b) => b.combo)
+      .filter((c) => !c.every(Boolean) && !c.every((w) => !w))
+      .map((c) => c.join(",")),
+  )].sort(
+    (a, b) =>
+      comboHash(a.split(",").map((v) => v === "true")) -
+      comboHash(b.split(",").map((v) => v === "true")),
+  );
+  const colorForKey = new Map(
+    distinctMixedKeys.map((key, i) => [key, MIXED_COMBO_COLORS[i % MIXED_COMBO_COLORS.length]]),
+  );
 
-    return { min: band.min, max: band.max, combo, color };
+  return bands.map(({ min, max, combo }) => {
+    let color: string;
+    if (combo.every(Boolean)) color = CARD_WIN_COLOR;
+    else if (combo.every((w) => !w)) color = CARD_LOSS_COLOR;
+    else color = colorForKey.get(combo.join(","))!;
+    return { min, max, combo, color };
   });
 }
 
@@ -445,8 +490,12 @@ function PlayerOutcomeCard({ entry }: { entry: RemainingPlayerAnalysis }) {
           fixed white) so it stays visible against bg-card in both themes,
           same as the dot/box-outline elsewhere on this card. A row of its
           own (not an overlay on the dot) is also what buys the breathing
-          room between the name and the chart. */}
-      <div className="flex justify-center">
+          room between the name and the chart. mt-2 on top of the card's own
+          gap-2, here and on the chart row below, widens specifically these
+          two gaps (name↔chip, chip↔chart line) without touching the
+          tighter spacing further down the card (chart↔labels,
+          labels↔legend, legend↔league badges). */}
+      <div className="mt-2 flex justify-center">
         <span
           className="inline-flex items-center rounded-full border-2 border-foreground px-2 py-0.5 text-xs font-bold text-foreground"
           title={statusLabel(entry.status)}
@@ -454,7 +503,7 @@ function PlayerOutcomeCard({ entry }: { entry: RemainingPlayerAnalysis }) {
           {Math.round(entry.currentPoints)}
         </span>
       </div>
-      <div className="relative h-6 w-full">
+      <div className="relative mt-2 h-6 w-full">
         <svg
           viewBox="0 0 100 10"
           preserveAspectRatio="none"
@@ -605,9 +654,6 @@ function PlayerOutcomeCard({ entry }: { entry: RemainingPlayerAnalysis }) {
               key={key}
               type="button"
               aria-pressed={isSelected}
-              title={entry.leagues
-                .map((l, i) => `${l.leagueName}: ${band.combo[i] ? "win" : "loss"}`)
-                .join(", ")}
               onClick={() => setSelectedKey((prev) => (prev === key ? null : key))}
               className="h-4 w-4 shrink-0 rounded-sm transition-shadow outline-none"
               style={{
@@ -624,7 +670,12 @@ function PlayerOutcomeCard({ entry }: { entry: RemainingPlayerAnalysis }) {
           );
         })}
       </div>
-      <div className="flex flex-wrap justify-center gap-2">
+      {/* mt-2 on top of the card's own gap-2 — the swatches above are only
+          h-4 with tight gap-3 wrapping, so team badges directly below could
+          end up sitting close enough to read as touching/colliding with
+          them; this pushes the badges down a bit further without affecting
+          the tighter spacing higher up the card. */}
+      <div className="mt-2 flex flex-wrap justify-center gap-2">
         {entry.leagues.map((l, i) => {
           // Red/green here is reserved for ONE thing: the win/loss border
           // from the legend selection — plain neutral text otherwise.
