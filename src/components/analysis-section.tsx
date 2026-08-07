@@ -393,7 +393,8 @@ function PlayerOutcomeCard({ entry }: { entry: RemainingPlayerAnalysis }) {
   // its real threshold as possible. Repeated over a few passes so a shove
   // that closes one gap can ripple out to the next pair over, same idea as
   // a chart axis's tick-label collision avoidance.
-  const dividerLabels = dividers
+  type DividerLabel = { key: string; x: number; value: number; text: string };
+  const dividerLabels: DividerLabel[] = dividers
     .flatMap((d) => {
       if (d.isSinglePoint) {
         const value = Math.round(d.leftPoints);
@@ -405,7 +406,22 @@ function PlayerOutcomeCard({ entry }: { entry: RemainingPlayerAnalysis }) {
       ];
     })
     .sort((a, b) => a.x - b.x)
-    .map((label) => ({ ...label, text: String(label.value) }));
+    .map((label) => ({ ...label, text: String(label.value) }))
+    // Two adjacent (but not merged — see MERGE_EPSILON above) boxes can have
+    // different exact thresholds that both round to the same displayed
+    // integer, e.g. box A ends at 8 and box B starts right next to it also
+    // at 8 — showing that number twice, back to back, reads as a repeated
+    // glyph rather than the shared edge it actually is. Collapse consecutive
+    // same-value labels into one, sitting at their shared boundary.
+    .reduce<DividerLabel[]>((acc, label) => {
+      const prev = acc[acc.length - 1];
+      if (prev && prev.value === label.value) {
+        prev.x = (prev.x + label.x) / 2;
+      } else {
+        acc.push(label);
+      }
+      return acc;
+    }, []);
   for (let pass = 0; pass < 4; pass++) {
     for (let i = 1; i < dividerLabels.length; i++) {
       const prev = dividerLabels[i - 1];
@@ -633,7 +649,7 @@ function PlayerOutcomeCard({ entry }: { entry: RemainingPlayerAnalysis }) {
               className="inline-flex items-center rounded-full border px-1.5 py-0.5 text-[10px] font-semibold text-foreground"
               style={{ borderColor }}
             >
-              {l.role === "opp-starter" ? `vs. ${l.leagueName}` : l.leagueName}
+              {l.role === "opp-starter" ? `vs. ${l.teamName}` : l.teamName}
             </span>
           );
         })}

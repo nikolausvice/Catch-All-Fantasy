@@ -16,6 +16,14 @@ interface EspnCreds {
 /** Lineup slots that mean "not in active lineup". */
 const BENCH_SLOTS = new Set(["Bench", "IR", "INVALID_CODE"]);
 
+/**
+ * Boxscore lineup slots that are already an unambiguous single real
+ * position — i.e. everything except a flex slot ("RB/WR/TE") or a
+ * not-in-lineup slot (BENCH_SLOTS), where the slot alone doesn't say which
+ * position the player actually is.
+ */
+const UNAMBIGUOUS_POSITION_SLOTS = new Set(["QB", "RB", "WR", "TE", "K", "D/ST"]);
+
 const SLOT_ORDER: Record<string, number> = {
   QB: 0, TQB: 1, RB: 2, WR: 3, "RB/WR": 4, TE: 5, "WR/TE": 6,
   "RB/WR/TE": 7, FLEX: 7, OP: 8, "D/ST": 9, K: 10, P: 11, HC: 12,
@@ -116,10 +124,29 @@ function buildEspnTeamFromBoxscore(
     const slot = p.rosteredPosition ?? "";
     const isBench = BENCH_SLOTS.has(slot);
     const details = playerDetails.get(p.id);
+    // BoxscorePlayer itself carries no position field — this join to the
+    // roster snapshot (getEspnLeagueTeams) is normally the only source of
+    // it, but it isn't fully trustworthy either: ESPN's defaultPositionId
+    // can come back as a shared flex-category id ("RB/WR", "WR/TE") for a
+    // player who's simply flex-eligible, and canonicalPlayerPosition's
+    // first-listed-position heuristic then silently mislabels a real WR as
+    // an RB (confirmed live for Ja'Marr Chase — ESPN reported his
+    // defaultPosition as "RB/WR" in one league, collapsing to "RB", while
+    // every other league correctly had him as "WR"). That produces a
+    // different cross-league identity key than the same real player
+    // elsewhere, splitting them into two separate Outcomes cards. The
+    // lineup slot he's actually rostered at THIS week doesn't have that
+    // ambiguity, so it wins whenever it's a single real position — not just
+    // as a fallback for a missing join, but in preference to a present-but-
+    // ambiguous one. Only a flex/bench slot (itself ambiguous) falls back
+    // to the roster snapshot's own (possibly imperfect) guess.
+    const position = UNAMBIGUOUS_POSITION_SLOTS.has(slot)
+      ? slot
+      : canonicalPlayerPosition(details?.defaultPosition ?? null);
     const entry: LeagueTeamPlayer = {
       id: String(p.id),
       name: p.fullName,
-      position: canonicalPlayerPosition(details?.defaultPosition ?? null),
+      position,
       proTeam: details?.proTeam ?? null,
       isStarter: !isBench,
       slot: slot || undefined,

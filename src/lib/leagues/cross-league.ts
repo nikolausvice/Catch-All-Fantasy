@@ -85,6 +85,12 @@ export interface RemainingPlayerAnalysis {
   /** Per-league impact for this player. */
   leagues: {
     leagueName: string;
+    /** The fantasy team this player plays for in this league — your own
+     * team's name for a "your-starter" role, the opponent's for
+     * "opp-starter". Shown on player-conflict badges instead of the league
+     * name, since "vs. <opponent>" says more about the actual trade-off
+     * than the league's own (often generic) name does. */
+    teamName: string;
     leagueId: string;
     role: "your-starter" | "opp-starter";
     /**
@@ -893,6 +899,7 @@ export function analyzeCrossLeague(
 
       entry.leagues.push({
         leagueName,
+        teamName: matchup.team.name,
         leagueId,
         role: "your-starter",
         breakEvenPoints: breakEven,
@@ -980,6 +987,7 @@ export function analyzeCrossLeague(
 
         entry.leagues.push({
           leagueName,
+          teamName: matchup.opponent.name,
           leagueId,
           role: "opp-starter",
           breakEvenPoints: maxAllowed,
