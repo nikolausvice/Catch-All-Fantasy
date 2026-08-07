@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useState } from "react";
 import type { CrossLeagueAnalysis, RemainingPlayerAnalysis } from "@/lib/leagues/cross-league";
 
@@ -37,14 +36,15 @@ function bandColor(wins: number, total: number): string {
  * two of these end up adjacent on a card, they read as clearly different
  * rather than two nearby shades of the same temperature. Light Blue sits
  * apart from Blue for the same reason: a hue shift toward cyan plus a big
- * jump in lightness, not just "a paler version of the same color." White is
- * pulled in slightly off pure white (#F1F5F9) so it stays distinguishable
- * from the chart's own always-white dot and box outline. Assigned in this
- * order as new combos are first encountered scanning left→right (see
- * computeComboBands); never reused for a different combo within one card. A
- * 7th distinct mixed combo on the same card — rare, needs 3+ pending
- * leagues splitting every possible way — cycles back to Blue rather than
- * growing further.
+ * jump in lightness, not just "a paler version of the same color." The 7th
+ * slot references --combo-slate (globals.css) rather than a fixed hex — a
+ * near-white swatch reads fine against a dark card but disappears against
+ * a light one, so light mode swaps in a mid slate instead of pure white.
+ * Assigned in this order as new combos are first encountered scanning
+ * left→right (see computeComboBands); never reused for a different combo
+ * within one card. A 7th distinct mixed combo on the same card — rare,
+ * needs 3+ pending leagues splitting every possible way — cycles back to
+ * Blue rather than growing further.
  */
 const MIXED_COMBO_COLORS = [
   "#3B82F6", // Blue
@@ -52,7 +52,7 @@ const MIXED_COMBO_COLORS = [
   "#A855F7", // Purple
   "#EAB308", // Yellow
   "#38BDF8", // Light Blue
-  "#F1F5F9", // White
+  "var(--combo-slate)", // Slate/white
 ];
 
 /**
@@ -384,16 +384,17 @@ function PlayerOutcomeCard({ entry }: { entry: RemainingPlayerAnalysis }) {
   });
 
   return (
-    <div className="flex flex-col gap-2 rounded-xl bg-card p-4">
+    <div className="flex flex-col gap-2 rounded-xl border border-border bg-card p-4">
       <p className="truncate text-center text-sm font-medium">{entry.name}</p>
       {/* Current score, averaged across leagues already (entry.currentPoints).
-          Plain chip, not colored by outcome — a white border, same as the
-          dot/box-outline elsewhere on this card. A row of its own (not an
-          overlay on the dot) is also what buys the breathing room between
-          the name and the chart. */}
+          Plain chip, not colored by outcome — border-foreground (not a
+          fixed white) so it stays visible against bg-card in both themes,
+          same as the dot/box-outline elsewhere on this card. A row of its
+          own (not an overlay on the dot) is also what buys the breathing
+          room between the name and the chart. */}
       <div className="flex justify-center">
         <span
-          className="inline-flex items-center rounded-full border-2 border-white px-2 py-0.5 text-xs font-bold text-foreground"
+          className="inline-flex items-center rounded-full border-2 border-foreground px-2 py-0.5 text-xs font-bold text-foreground"
           title={statusLabel(entry.status)}
         >
           {Math.round(entry.currentPoints)}
@@ -483,7 +484,7 @@ function PlayerOutcomeCard({ entry }: { entry: RemainingPlayerAnalysis }) {
                 y1={0}
                 x2={d.leftX}
                 y2={10}
-                stroke="white"
+                className="stroke-foreground"
                 strokeWidth={1.5}
                 vectorEffect="non-scaling-stroke"
               />
@@ -495,7 +496,7 @@ function PlayerOutcomeCard({ entry }: { entry: RemainingPlayerAnalysis }) {
                 width={d.rightX - d.leftX}
                 height={9}
                 fill="none"
-                stroke="white"
+                className="stroke-foreground"
                 strokeWidth={1.5}
                 vectorEffect="non-scaling-stroke"
               />
@@ -511,7 +512,7 @@ function PlayerOutcomeCard({ entry }: { entry: RemainingPlayerAnalysis }) {
             currentPoints value worth marking (0 before kickoff is still a
             real point on the axis, not "nothing to show"). */}
         <div
-          className="absolute top-1/2 h-2 w-2 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white"
+          className="absolute top-1/2 h-2 w-2 -translate-x-1/2 -translate-y-1/2 rounded-full bg-foreground"
           style={{ left: `${pct(entry.currentPoints)}%` }}
         />
       </div>
@@ -530,9 +531,9 @@ function PlayerOutcomeCard({ entry }: { entry: RemainingPlayerAnalysis }) {
                 // Only the "already covered" (negative) case gets colored —
                 // same CARD_LOSS_COLOR as everywhere else on this page. A
                 // normal, still-actionable positive threshold is plain
-                // white, not the win color; it's not calling out a good/bad
-                // outcome, just a number.
-                className="absolute -translate-x-1/2 whitespace-nowrap text-[10px] font-medium leading-none text-white"
+                // foreground text, not the win color; it's not calling out
+                // a good/bad outcome, just a number.
+                className="absolute -translate-x-1/2 whitespace-nowrap text-[10px] font-medium leading-none text-foreground"
                 style={{
                   left: `${d.centerX}%`,
                   color: displayValue < 0 ? CARD_LOSS_COLOR : undefined,
@@ -547,7 +548,7 @@ function PlayerOutcomeCard({ entry }: { entry: RemainingPlayerAnalysis }) {
           return [
             <span
               key={`label-start-${d.key}`}
-              className="absolute -translate-x-1/2 whitespace-nowrap text-[10px] font-medium leading-none text-white"
+              className="absolute -translate-x-1/2 whitespace-nowrap text-[10px] font-medium leading-none text-foreground"
               style={{
                 left: `${d.leftX}%`,
                 color: startValue < 0 ? CARD_LOSS_COLOR : undefined,
@@ -557,7 +558,7 @@ function PlayerOutcomeCard({ entry }: { entry: RemainingPlayerAnalysis }) {
             </span>,
             <span
               key={`label-end-${d.key}`}
-              className="absolute -translate-x-1/2 whitespace-nowrap text-[10px] font-medium leading-none text-white"
+              className="absolute -translate-x-1/2 whitespace-nowrap text-[10px] font-medium leading-none text-foreground"
               style={{
                 left: `${d.rightX}%`,
                 color: endValue < 0 ? CARD_LOSS_COLOR : undefined,
@@ -603,7 +604,7 @@ function PlayerOutcomeCard({ entry }: { entry: RemainingPlayerAnalysis }) {
           );
         })}
       </div>
-      <div className="flex flex-wrap justify-center gap-1">
+      <div className="flex flex-wrap justify-center gap-2">
         {entry.leagues.map((l, i) => {
           // Red/green here is reserved for ONE thing: the win/loss border
           // from the legend selection — plain neutral text otherwise.
@@ -619,15 +620,17 @@ function PlayerOutcomeCard({ entry }: { entry: RemainingPlayerAnalysis }) {
             : selectedCombo[i]
             ? CARD_WIN_COLOR
             : CARD_LOSS_COLOR;
+          // A span, not a link — these badges exist to answer "what does
+          // this combo mean for this league," via the border color above,
+          // not to navigate anywhere.
           return (
-            <Link
+            <span
               key={l.leagueId}
-              href={`/dashboard/leagues/${l.leagueId}`}
-              className="inline-flex items-center rounded-full border px-1.5 py-0.5 text-[10px] font-semibold text-foreground transition-colors hover:bg-muted"
+              className="inline-flex items-center rounded-full border px-1.5 py-0.5 text-[10px] font-semibold text-foreground"
               style={{ borderColor }}
             >
-              {l.leagueName}
-            </Link>
+              {l.role === "opp-starter" ? `vs. ${l.leagueName}` : l.leagueName}
+            </span>
           );
         })}
       </div>
@@ -668,7 +671,7 @@ function ExactBarVisual() {
         y1={0}
         x2={45}
         y2={10}
-        stroke="white"
+        className="stroke-foreground"
         strokeWidth={1.5}
         vectorEffect="non-scaling-stroke"
       />
@@ -696,7 +699,7 @@ function UncertainBoxVisual() {
         width={24}
         height={9}
         fill="none"
-        stroke="white"
+        className="stroke-foreground"
         strokeWidth={1.5}
         vectorEffect="non-scaling-stroke"
       />
@@ -759,7 +762,14 @@ function HowItWorksGuide() {
           <p className="mt-1">
             The number under each player&apos;s name is their current score — averaged if the
             same real player scores differently across leagues (different scoring settings).
-            League chips are clickable and jump straight to that league&apos;s matchup.
+          </p>
+        </div>
+        <div>
+          <p className="font-medium text-foreground">Player search</p>
+          <p className="mt-1">
+            Use the search bar above to jump straight to one player&apos;s card, or head to the
+            Rooting Guide tab to see every league they&apos;re rostered in and whether
+            they&apos;re helping or hurting you in each.
           </p>
         </div>
       </div>
@@ -772,14 +782,32 @@ function PlayerOutcomesSection({
 }: {
   players: RemainingPlayerAnalysis[];
 }) {
+  const [search, setSearch] = useState("");
+  const visible = search
+    ? players.filter((p) => p.name.toLowerCase().includes(search.toLowerCase()))
+    : players;
+
   return (
     <div className="flex flex-col gap-4">
+      <input
+        type="text"
+        value={search}
+        onChange={(e) => setSearch(e.target.value)}
+        placeholder="Search players…"
+        className="rounded-lg border border-border bg-card px-3 py-1.5 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+      />
       <HowItWorksGuide />
-      <div className="grid gap-3 sm:grid-cols-2">
-        {players.map((entry) => (
-          <PlayerOutcomeCard key={entry.playerId} entry={entry} />
-        ))}
-      </div>
+      {visible.length === 0 ? (
+        <p className="rounded-xl border border-dashed border-border p-8 text-center text-sm text-muted-foreground">
+          No players match &quot;{search}&quot;.
+        </p>
+      ) : (
+        <div className="grid gap-3 sm:grid-cols-2">
+          {visible.map((entry) => (
+            <PlayerOutcomeCard key={entry.playerId} entry={entry} />
+          ))}
+        </div>
+      )}
     </div>
   );
 }

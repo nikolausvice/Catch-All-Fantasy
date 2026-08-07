@@ -1,6 +1,7 @@
 import Link from "next/link";
-import { BarChart3, GitCompare, LayoutGrid } from "lucide-react";
+import { BarChart3, GitCompare, LayoutGrid, LogIn, Search, Sparkles } from "lucide-react";
 import { SiteFooter } from "@/components/site-footer";
+import { ACCENT, ACCENT_FOREGROUND, ACCENT_SOFT } from "@/lib/brand";
 
 const FEATURES = [
   {
@@ -17,6 +18,29 @@ const FEATURES = [
     icon: BarChart3,
     title: "Know your real odds",
     description: "One combined probability breakdown for how many matchups you'll win this week.",
+  },
+] as const;
+
+const HOW_IT_WORKS = [
+  {
+    icon: LogIn,
+    title: "Connect your leagues",
+    description: "A Sleeper username, or an ESPN login — private leagues included.",
+  },
+  {
+    icon: LayoutGrid,
+    title: "See every matchup",
+    description: "All your leagues' scores and projections land on one dashboard.",
+  },
+  {
+    icon: Search,
+    title: "Search players",
+    description: "Look up any player to see everywhere they're rostered across your leagues.",
+  },
+  {
+    icon: Sparkles,
+    title: "Know your outcomes",
+    description: "A breakdown of every combination of wins and losses still in play this week.",
   },
 ] as const;
 
@@ -75,7 +99,8 @@ export default function Home() {
             </Link>
             <Link
               href="/signup"
-              className="rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground hover:opacity-90"
+              className="rounded-md px-3 py-2 text-sm font-medium hover:opacity-90"
+              style={{ backgroundColor: ACCENT, color: ACCENT_FOREGROUND }}
             >
               Sign up
             </Link>
@@ -87,16 +112,18 @@ export default function Home() {
         <section className="mx-auto flex w-full max-w-5xl flex-col items-center gap-10 px-4 py-16 sm:py-24">
           <div className="flex max-w-2xl flex-col items-center gap-6 text-center">
             <h1 className="text-4xl font-semibold tracking-tight sm:text-5xl">
-              All your fantasy leagues. <span className="text-primary">One dashboard.</span>
+              All your fantasy leagues.{" "}
+              <span style={{ color: ACCENT }}>One dashboard.</span>
             </h1>
             <p className="max-w-xl text-balance text-muted-foreground">
-              Every Sleeper and ESPN league, one dashboard — matchups, conflicts, and your real
-              odds each week.
+              Every Sleeper and ESPN league, one dashboard — matchups, conflicts, player search,
+              and your real odds each week.
             </p>
             <div className="flex gap-3">
               <Link
                 href="/signup"
-                className="rounded-md bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground hover:opacity-90"
+                className="rounded-md px-5 py-2.5 text-sm font-medium hover:opacity-90"
+                style={{ backgroundColor: ACCENT, color: ACCENT_FOREGROUND }}
               >
                 Get started
               </Link>
@@ -133,7 +160,10 @@ export default function Home() {
           <div className="mx-auto grid max-w-5xl gap-8 px-4 sm:grid-cols-3">
             {FEATURES.map(({ icon: Icon, title, description }) => (
               <div key={title} className="flex flex-col gap-3">
-                <div className="flex size-10 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                <div
+                  className="flex size-10 items-center justify-center rounded-lg"
+                  style={{ backgroundColor: ACCENT_SOFT, color: ACCENT }}
+                >
                   <Icon className="size-5" />
                 </div>
                 <h2 className="font-semibold">{title}</h2>
@@ -143,7 +173,38 @@ export default function Home() {
           </div>
         </section>
 
-        <section className="py-16 sm:py-20">
+        <section className="border-t border-border py-16 sm:py-20">
+          <div className="mx-auto flex max-w-5xl flex-col gap-10 px-4">
+            <div className="flex flex-col items-center gap-2 text-center">
+              <h2 className="text-2xl font-semibold tracking-tight">How it works</h2>
+              <p className="max-w-xl text-balance text-sm text-muted-foreground">
+                From league login to knowing exactly where you stand, in four steps.
+              </p>
+            </div>
+            <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
+              {HOW_IT_WORKS.map(({ icon: Icon, title, description }, i) => (
+                <div
+                  key={title}
+                  className="flex flex-col gap-3 rounded-xl border border-border bg-card p-4"
+                >
+                  <div className="flex items-center gap-2">
+                    <div
+                      className="flex size-8 shrink-0 items-center justify-center rounded-full text-xs font-bold"
+                      style={{ backgroundColor: ACCENT, color: ACCENT_FOREGROUND }}
+                    >
+                      {i + 1}
+                    </div>
+                    <Icon className="size-4 text-muted-foreground" />
+                  </div>
+                  <h3 className="font-semibold">{title}</h3>
+                  <p className="text-sm text-muted-foreground">{description}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        <section className="border-t border-border py-16 sm:py-20">
           <div className="mx-auto flex max-w-5xl flex-col items-center gap-4 px-4 text-center">
             <p className="text-sm font-medium uppercase tracking-wide text-muted-foreground">
               Works with the leagues you already play in
@@ -165,7 +226,8 @@ export default function Home() {
             <h2 className="text-2xl font-semibold tracking-tight">See it all, every week.</h2>
             <Link
               href="/signup"
-              className="rounded-md bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground hover:opacity-90"
+              className="rounded-md px-5 py-2.5 text-sm font-medium hover:opacity-90"
+              style={{ backgroundColor: ACCENT, color: ACCENT_FOREGROUND }}
             >
               Get started
             </Link>

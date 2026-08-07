@@ -4,13 +4,10 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { ArrowUpRight, Menu } from "lucide-react";
 import { signOut } from "@/app/(auth)/actions";
-import { AddLeagueButton } from "@/components/add-league-button";
 import { GITHUB_URL } from "@/components/site-footer";
 import { cn, headerButtonClass } from "@/lib/utils";
 
-const MENU_ITEM_CLASS = "block w-full px-3 py-2 text-left text-sm hover:bg-muted";
-
-export function UserMenu({ hasStoredEspnCookies }: { hasStoredEspnCookies: boolean }) {
+export function UserMenu() {
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -34,28 +31,12 @@ export function UserMenu({ hasStoredEspnCookies }: { hasStoredEspnCookies: boole
       >
         <Menu className="size-4" />
       </button>
-      {/* Always mounted (visibility toggled via CSS) rather than
-          conditionally rendered — AddLeagueButton below owns its own modal
-          state via a portal, and unmounting this subtree on close would tear
-          the modal down mid-open the instant it's opened, since both close
-          (this menu) and open (the modal) happen in the same click's
-          batched update. */}
       <div
         className={cn(
           "absolute right-0 top-full z-20 mt-2 w-44 overflow-hidden rounded-md border border-border bg-card py-1 shadow-lg",
           open ? "block" : "hidden",
         )}
       >
-        {/* Closes the dropdown on click via bubbling, same as every other
-            row here — AddLeagueButton owns its own modal state, so this
-            wrapper's only job is tidying up the menu behind it. */}
-        <div onClick={() => setOpen(false)}>
-          <AddLeagueButton
-            hasStoredEspnCookies={hasStoredEspnCookies}
-            label="+ Add league"
-            className={MENU_ITEM_CLASS}
-          />
-        </div>
         <Link
           href="/dashboard/settings"
           onClick={() => setOpen(false)}

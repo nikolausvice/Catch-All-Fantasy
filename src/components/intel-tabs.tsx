@@ -5,7 +5,7 @@ import { ElementHeightVar } from "@/components/element-height-var";
 
 const TABS = [
   { key: "overview", label: "Overview" },
-  { key: "players", label: "Players" },
+  { key: "players", label: "Rooting Guide" },
   { key: "outcomes", label: "Outcomes" },
 ] as const;
 
@@ -29,10 +29,16 @@ export function IntelTabs({
           tabs the moment you scroll meant scrolling back to the top just to
           switch views. -mx-4/px-4 cancels out <main>'s own horizontal
           padding so the solid background spans edge to edge instead of
-          leaving the page's side margins see-through. */}
+          leaving the page's side margins see-through. -mt-4 cancels out
+          <main>'s own top padding (pt-4 at every breakpoint) the same
+          way — otherwise that gap sits
+          above the tabs bar at scroll position 0 but disappears the instant
+          the bar reaches its sticky offset and catches the header, reading
+          as the gap visibly getting squeezed out while scrolling. Flush
+          against the header from the very first frame avoids that. */}
       <div
         id="app-tabs"
-        className="sticky z-10 -mx-4 border-b border-border bg-background px-4 py-2"
+        className="sticky z-10 -mx-4 -mt-4 border-b border-border bg-background px-4 py-2"
         style={{ top: "var(--site-header-height, 69px)" }}
       >
         <ElementHeightVar selector="#app-tabs" varName="--tabs-height" />

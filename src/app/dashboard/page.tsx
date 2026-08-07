@@ -8,6 +8,7 @@ import { AddLeagueButton } from "@/components/add-league-button";
 import { AnalysisSection, WinScenariosSection } from "@/components/analysis-section";
 import { AvatarImage } from "@/components/avatar-image";
 import { IntelTabs } from "@/components/intel-tabs";
+import { ACCENT } from "@/lib/brand";
 import { RemoveLeagueButton } from "@/components/remove-league-button";
 import { VennExplorer } from "@/components/venn-diagram";
 import type { VennComboInfo, VennSetInfo } from "@/components/venn-diagram";
@@ -329,7 +330,8 @@ function MatchupsTab({
                   ) : (
                     <Link
                       href={`/dashboard/leagues/${league.id}/select-team`}
-                      className="shrink-0 text-xs font-medium text-primary hover:underline"
+                      className="shrink-0 text-xs font-medium hover:underline"
+                      style={{ color: ACCENT }}
                     >
                       Pick your team →
                     </Link>

@@ -9,6 +9,7 @@ export function AddLeagueButton({
   hasStoredEspnCookies,
   className = headerButtonClass,
   label = "+ Add league",
+  ariaLabel,
 }: {
   hasStoredEspnCookies: boolean;
   /** Lets the same self-contained trigger+modal be dropped into a header
@@ -16,6 +17,9 @@ export function AddLeagueButton({
    * copies of the modal/portal/escape-key logic to keep in sync. */
   className?: string;
   label?: string;
+  /** Set when `label` alone (e.g. a bare "+") isn't descriptive enough for
+   * a screen reader. */
+  ariaLabel?: string;
 }) {
   const [open, setOpen] = useState(false);
   // Portals can't render on the server (no document there), so wait for the
@@ -82,7 +86,12 @@ export function AddLeagueButton({
 
   return (
     <>
-      <button type="button" onClick={() => setOpen(true)} className={className}>
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className={className}
+        aria-label={ariaLabel}
+      >
         {label}
       </button>
       {mounted ? createPortal(modal, document.body) : null}

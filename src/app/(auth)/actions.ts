@@ -47,6 +47,10 @@ export async function signUp(
     return { error: "Password must be at least 6 characters." };
   }
 
+  if (formData.get("acceptedTerms") !== "on") {
+    return { error: "You must agree to the Terms of Service and Privacy Policy to sign up." };
+  }
+
   const existing = await db.query.users.findFirst({
     where: eq(users.email, email),
   });

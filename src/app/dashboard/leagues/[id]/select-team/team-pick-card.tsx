@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Check } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { AvatarImage } from "@/components/avatar-image";
+import { ACCENT } from "@/lib/brand";
 import type { LeagueTeamSummary } from "@/lib/leagues/types";
 import { setUserTeam } from "../actions";
 
@@ -36,10 +37,9 @@ export function TeamPickCard({
       }
       className={cn(
         "flex min-h-[44px] w-full items-center gap-3 rounded-xl border p-4 text-left transition-colors disabled:opacity-60",
-        isSelected
-          ? "border-2 border-primary bg-card"
-          : "border-border bg-card hover:bg-muted",
+        isSelected ? "border-2 bg-card" : "border-border bg-card hover:bg-muted",
       )}
+      style={isSelected ? { borderColor: ACCENT } : undefined}
     >
       <AvatarImage
         name={team.name}
@@ -57,7 +57,7 @@ export function TeamPickCard({
       {isPending ? (
         <span className="shrink-0 text-xs text-muted-foreground">Saving…</span>
       ) : isSelected ? (
-        <Check className="size-5 shrink-0 text-primary" />
+        <Check className="size-5 shrink-0" style={{ color: ACCENT }} />
       ) : null}
     </button>
   );

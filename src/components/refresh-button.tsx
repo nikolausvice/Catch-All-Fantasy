@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { headerButtonClass } from "@/lib/utils";
+import { cn, headerButtonClass } from "@/lib/utils";
 
 /** "just now" / "5s ago" / "12m ago" / "3h ago" — coarser as it gets older,
  * since the exact second stops mattering once it's been a while. */
@@ -36,14 +36,19 @@ export function RefreshButton() {
     <div className="flex items-center gap-2">
       <span className="text-xs text-muted-foreground">{relativeTime(lastRefreshedAt, now)}</span>
       <button
+        type="button"
+        aria-label="Refresh"
         onClick={() => {
           setLastRefreshedAt(Date.now());
           startTransition(() => router.refresh());
         }}
         disabled={pending}
-        className={headerButtonClass}
+        className={cn(headerButtonClass, "w-9 px-0")}
       >
-        {pending ? "Refreshing…" : "↻ Refresh"}
+        {/* Icon only — no "Refresh" word — since it sits right next to the
+            equally compact "+ Add league" and hamburger buttons in the
+            header. */}
+        ↻
       </button>
     </div>
   );

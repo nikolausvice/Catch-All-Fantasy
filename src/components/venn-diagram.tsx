@@ -174,7 +174,7 @@ export function VennExplorer({
           No players match these filters.
         </p>
       ) : (
-      <div className="flex flex-col gap-2">
+      <div className="grid gap-2 sm:grid-cols-2">
         {visible.map((p) => {
           const isFiltered = selected.length > 0 && !matchingPlayerIds.has(p.id);
           return (

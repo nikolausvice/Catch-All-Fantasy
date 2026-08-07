@@ -5,6 +5,7 @@ import { connectedLeagues, platformIdentities } from "@/db/schema";
 import { DeleteAccountButton } from "@/components/delete-account-button";
 import { EspnIdentityManager, type EspnIdentitySummary } from "@/components/espn-identity-manager";
 import { RemoveLeagueButton } from "@/components/remove-league-button";
+import { ThemeSettings } from "@/components/theme-settings";
 import { requireSessionUserId, STALE_SESSION_MESSAGE } from "@/lib/auth/require-user";
 
 const PLATFORM_LABEL: Record<string, string> = {
@@ -46,6 +47,16 @@ export default async function SettingsPage() {
           ← Back to dashboard
         </Link>
       </div>
+
+      <section className="flex flex-col gap-3">
+        <div>
+          <h2 className="text-lg font-semibold">Appearance</h2>
+          <p className="text-sm text-muted-foreground">
+            Choose a theme, or match your device&apos;s setting.
+          </p>
+        </div>
+        <ThemeSettings />
+      </section>
 
       <section className="flex flex-col gap-3">
         <div>

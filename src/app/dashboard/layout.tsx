@@ -4,11 +4,13 @@ import { eq, and } from "drizzle-orm";
 import { auth } from "@/auth";
 import { db } from "@/db/client";
 import { platformIdentities } from "@/db/schema";
+import { AddLeagueButton } from "@/components/add-league-button";
 import { ElementHeightVar } from "@/components/element-height-var";
 import { RefreshButton } from "@/components/refresh-button";
 import { SiteFooter } from "@/components/site-footer";
 import { UserMenu } from "@/components/user-menu";
 import { requireSessionUserId } from "@/lib/auth/require-user";
+import { cn, headerButtonClass } from "@/lib/utils";
 
 export default async function DashboardLayout({
   children,
@@ -40,13 +42,19 @@ export default async function DashboardLayout({
           rather than an intentional effect. */}
       <header id="site-header" className="sticky top-0 z-20 border-b border-border bg-background">
         <ElementHeightVar selector="#site-header" varName="--site-header-height" />
-        <div className="mx-auto flex max-w-5xl flex-col items-center gap-2 px-4 py-3 sm:flex-row sm:justify-between sm:py-4">
+        <div className="mx-auto flex max-w-5xl items-center justify-between px-4 py-3 sm:py-4">
           <Link href="/dashboard" className="font-semibold tracking-tight">
             Catch All Fantasy
           </Link>
-          <div className="flex flex-wrap items-center justify-center gap-2 sm:justify-start sm:gap-3">
+          <div className="flex items-center gap-2">
             <RefreshButton />
-            <UserMenu hasStoredEspnCookies={!!espnIdentity} />
+            <AddLeagueButton
+              hasStoredEspnCookies={!!espnIdentity}
+              label="+"
+              ariaLabel="Add league"
+              className={cn(headerButtonClass, "w-9 px-0")}
+            />
+            <UserMenu />
           </div>
         </div>
       </header>
