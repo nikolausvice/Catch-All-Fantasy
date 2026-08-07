@@ -34,53 +34,62 @@ export function UserMenu({ hasStoredEspnCookies }: { hasStoredEspnCookies: boole
       >
         <Menu className="size-4" />
       </button>
-      {open && (
-        <div className="absolute right-0 top-full z-20 mt-2 w-44 overflow-hidden rounded-md border border-border bg-card py-1 shadow-lg">
-          {/* Closes the dropdown on click via bubbling, same as every other
-              row here — AddLeagueButton owns its own modal state, so this
-              wrapper's only job is tidying up the menu behind it. */}
-          <div onClick={() => setOpen(false)}>
-            <AddLeagueButton
-              hasStoredEspnCookies={hasStoredEspnCookies}
-              label="+ Add league"
-              className={MENU_ITEM_CLASS}
-            />
-          </div>
-          <Link
-            href="/dashboard/settings"
-            onClick={() => setOpen(false)}
-            className="block px-3 py-2 text-sm hover:bg-muted"
-          >
-            Settings
-          </Link>
-          <Link
-            href="/faq"
-            onClick={() => setOpen(false)}
-            className="block px-3 py-2 text-sm hover:bg-muted"
-          >
-            FAQ
-          </Link>
-          <a
-            href={GITHUB_URL}
-            target="_blank"
-            rel="noopener noreferrer"
-            onClick={() => setOpen(false)}
-            className="flex items-center justify-between gap-2 px-3 py-2 text-sm hover:bg-muted"
-          >
-            GitHub
-            <ArrowUpRight className="size-3.5 text-muted-foreground" />
-          </a>
-          <div className="my-1 border-t border-border" />
-          <form action={signOut}>
-            <button
-              type="submit"
-              className="block w-full px-3 py-2 text-left text-sm hover:bg-muted"
-            >
-              Log out
-            </button>
-          </form>
+      {/* Always mounted (visibility toggled via CSS) rather than
+          conditionally rendered — AddLeagueButton below owns its own modal
+          state via a portal, and unmounting this subtree on close would tear
+          the modal down mid-open the instant it's opened, since both close
+          (this menu) and open (the modal) happen in the same click's
+          batched update. */}
+      <div
+        className={cn(
+          "absolute right-0 top-full z-20 mt-2 w-44 overflow-hidden rounded-md border border-border bg-card py-1 shadow-lg",
+          open ? "block" : "hidden",
+        )}
+      >
+        {/* Closes the dropdown on click via bubbling, same as every other
+            row here — AddLeagueButton owns its own modal state, so this
+            wrapper's only job is tidying up the menu behind it. */}
+        <div onClick={() => setOpen(false)}>
+          <AddLeagueButton
+            hasStoredEspnCookies={hasStoredEspnCookies}
+            label="+ Add league"
+            className={MENU_ITEM_CLASS}
+          />
         </div>
-      )}
+        <Link
+          href="/dashboard/settings"
+          onClick={() => setOpen(false)}
+          className="block px-3 py-2 text-sm hover:bg-muted"
+        >
+          Settings
+        </Link>
+        <Link
+          href="/faq"
+          onClick={() => setOpen(false)}
+          className="block px-3 py-2 text-sm hover:bg-muted"
+        >
+          FAQ
+        </Link>
+        <a
+          href={GITHUB_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          onClick={() => setOpen(false)}
+          className="flex items-center justify-between gap-2 px-3 py-2 text-sm hover:bg-muted"
+        >
+          GitHub
+          <ArrowUpRight className="size-3.5 text-muted-foreground" />
+        </a>
+        <div className="my-1 border-t border-border" />
+        <form action={signOut}>
+          <button
+            type="submit"
+            className="block w-full px-3 py-2 text-left text-sm hover:bg-muted"
+          >
+            Log out
+          </button>
+        </form>
+      </div>
     </div>
   );
 }
