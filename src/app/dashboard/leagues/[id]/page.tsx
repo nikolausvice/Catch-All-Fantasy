@@ -9,6 +9,7 @@ import { getScoreOverrides } from "@/lib/leagues/score-overrides";
 import { getCurrentNflWeek } from "@/lib/leagues/week";
 import { AvatarImage } from "@/components/avatar-image";
 import { DemoScoreEditor } from "@/components/demo-score-editor";
+import { AppTabsBar } from "@/components/intel-tabs";
 import { RemoveLeagueButton } from "@/components/remove-league-button";
 import { loadMatchup } from "../../_load-matchup";
 import type { LeagueTeam, LeagueTeamPlayer } from "@/lib/leagues/types";
@@ -232,36 +233,36 @@ export default async function LeagueDetailPage({
       : new Map<string, GameStatus>();
   return (
     <div className="flex flex-col gap-6">
+      {/* Same tab bar as the dashboard itself, not just a "back" link — a
+          single matchup is one click deep from any of the three tabs
+          (Overview/Rooting Guide/Outcomes), and losing them entirely down
+          here made getting to a different one a two-step trip through the
+          dashboard's own Overview tab every time. None highlighted (there's
+          no "current tab" once you're not actually on the dashboard); each
+          still links straight to that tab via /dashboard?tab=. */}
+      <AppTabsBar activeKey={null} />
       {/* Header */}
-      <div>
-        <Link
-          href="/dashboard"
-          className="text-sm text-muted-foreground hover:text-foreground"
-        >
-          ← Back to dashboard
-        </Link>
-        <div className="mt-2 flex flex-wrap items-start justify-between gap-3">
-          <div className="min-w-0">
-            <h1 className="truncate text-2xl font-semibold tracking-tight">
-              {league.leagueName}
-            </h1>
-            <p className="mt-1 text-sm text-muted-foreground">
-              {PLATFORM_LABEL[league.platform] ?? league.platform} ·{" "}
-              {league.season}
-              {matchup ? ` · Week ${matchup.week}` : ""}
-            </p>
-          </div>
-          <div className="flex shrink-0 items-center gap-2">
-            {league.platform !== "demo" && (
-              <Link
-                href={`/dashboard/leagues/${id}/select-team`}
-                className="rounded-md border border-border px-3 py-1.5 text-xs font-medium hover:bg-muted"
-              >
-                Switch team
-              </Link>
-            )}
-            <RemoveLeagueButton leagueRowId={id} leagueName={league.leagueName} />
-          </div>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h1 className="truncate text-2xl font-semibold tracking-tight">
+            {league.leagueName}
+          </h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            {PLATFORM_LABEL[league.platform] ?? league.platform} ·{" "}
+            {league.season}
+            {matchup ? ` · Week ${matchup.week}` : ""}
+          </p>
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
+          {league.platform !== "demo" && (
+            <Link
+              href={`/dashboard/leagues/${id}/select-team`}
+              className="rounded-md border border-border px-3 py-1.5 text-xs font-medium hover:bg-muted"
+            >
+              Switch team
+            </Link>
+          )}
+          <RemoveLeagueButton leagueRowId={id} leagueName={league.leagueName} />
         </div>
       </div>
 

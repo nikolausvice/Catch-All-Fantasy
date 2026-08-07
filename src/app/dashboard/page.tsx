@@ -8,6 +8,7 @@ import { AddLeagueButton } from "@/components/add-league-button";
 import { AnalysisSection, WinScenariosSection } from "@/components/analysis-section";
 import { AvatarImage } from "@/components/avatar-image";
 import { IntelTabs } from "@/components/intel-tabs";
+import { isTabKey } from "@/lib/tabs";
 import { ACCENT } from "@/lib/brand";
 import { RemoveLeagueButton } from "@/components/remove-league-button";
 import { VennExplorer } from "@/components/venn-diagram";
@@ -371,7 +372,14 @@ function MatchupsTab({
 
 // ── Page ───────────────────────────────────────────────────────────────────
 
-export default async function DashboardPage() {
+export default async function DashboardPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ tab?: string }>;
+}) {
+  const { tab } = await searchParams;
+  const initialTab = isTabKey(tab) ? tab : undefined;
+
   const session = await auth();
   const userId = session!.user.id;
 
@@ -441,6 +449,7 @@ export default async function DashboardPage() {
         </div>
       ) : (
         <IntelTabs
+          initialTab={initialTab}
           overview={
             <Fragment key="overview">
               <WinScenariosSection

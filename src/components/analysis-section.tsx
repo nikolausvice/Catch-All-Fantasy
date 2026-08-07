@@ -838,7 +838,7 @@ function HowItWorksGuide() {
         <div>
           <p className="font-medium text-foreground">Player search</p>
           <p className="mt-1">
-            Use the search bar above to jump straight to one player&apos;s card, or head to the
+            Use the search bar below to jump straight to one player&apos;s card, or head to the
             Rooting Guide tab to see every league they&apos;re rostered in and whether
             they&apos;re helping or hurting you in each.
           </p>
@@ -860,14 +860,14 @@ function PlayerOutcomesSection({
 
   return (
     <div className="flex flex-col gap-4">
+      <HowItWorksGuide />
       <input
         type="text"
         value={search}
         onChange={(e) => setSearch(e.target.value)}
         placeholder="Search players…"
-        className="rounded-lg border border-border bg-card px-3 py-1.5 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+        className="rounded-lg border border-border bg-card px-3 py-1.5 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-border"
       />
-      <HowItWorksGuide />
       {visible.length === 0 ? (
         <p className="rounded-xl border border-dashed border-border p-8 text-center text-sm text-muted-foreground">
           No players match &quot;{search}&quot;.

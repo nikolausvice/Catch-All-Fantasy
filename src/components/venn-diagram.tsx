@@ -127,7 +127,7 @@ export function VennExplorer({
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           placeholder="Search players…"
-          className="min-w-0 flex-1 rounded-lg border border-border bg-card px-3 py-1.5 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+          className="min-w-0 flex-1 rounded-lg border border-border bg-card px-3 py-1.5 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-border"
         />
         <select
           value={position}
