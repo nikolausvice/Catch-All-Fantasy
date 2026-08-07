@@ -1,16 +1,11 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { eq, and } from "drizzle-orm";
 import { auth } from "@/auth";
-import { db } from "@/db/client";
-import { platformIdentities } from "@/db/schema";
-import { AddLeagueButton } from "@/components/add-league-button";
 import { ElementHeightVar } from "@/components/element-height-var";
 import { RefreshButton } from "@/components/refresh-button";
 import { SiteFooter } from "@/components/site-footer";
 import { UserMenu } from "@/components/user-menu";
 import { requireSessionUserId } from "@/lib/auth/require-user";
-import { cn, headerButtonClass } from "@/lib/utils";
 
 export default async function DashboardLayout({
   children,
@@ -29,11 +24,6 @@ export default async function DashboardLayout({
   const userId = await requireSessionUserId();
   if (!userId) redirect("/clear-session");
 
-  const espnIdentity = await db.query.platformIdentities.findFirst({
-    where: and(eq(platformIdentities.userId, userId), eq(platformIdentities.platform, "espn")),
-    columns: { id: true },
-  });
-
   return (
     <div className="flex min-h-screen flex-col">
       {/* Solid, not translucent — a blurred/semi-transparent header lets
@@ -46,14 +36,12 @@ export default async function DashboardLayout({
           <Link href="/dashboard" className="font-semibold tracking-tight">
             Catch All Fantasy
           </Link>
+          {/* + Add league moved to the app tabs bar (to the right of
+              Outcomes) — see AppTabsBar in intel-tabs.tsx — so it mirrors
+              the Outcomes filter row's own trailing "?" button instead of
+              living up here. */}
           <div className="flex items-center gap-2">
             <RefreshButton />
-            <AddLeagueButton
-              hasStoredEspnCookies={!!espnIdentity}
-              label={<span className="text-lg font-semibold leading-none">+</span>}
-              ariaLabel="Add league"
-              className={cn(headerButtonClass, "w-9 px-0")}
-            />
             <UserMenu />
           </div>
         </div>

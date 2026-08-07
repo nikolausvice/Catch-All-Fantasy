@@ -450,6 +450,7 @@ export default async function DashboardPage({
       ) : (
         <IntelTabs
           initialTab={initialTab}
+          hasStoredEspnCookies={espnIdentities.length > 0}
           overview={
             <Fragment key="overview">
               <WinScenariosSection

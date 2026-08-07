@@ -3,7 +3,7 @@ import { notFound, redirect } from "next/navigation";
 import { and, eq } from "drizzle-orm";
 import { auth } from "@/auth";
 import { db } from "@/db/client";
-import { connectedLeagues } from "@/db/schema";
+import { connectedLeagues, platformIdentities } from "@/db/schema";
 import { getNflGameStatuses, type GameStatus } from "@/lib/leagues/nfl-schedule";
 import { getScoreOverrides } from "@/lib/leagues/score-overrides";
 import { getCurrentNflWeek } from "@/lib/leagues/week";
@@ -223,6 +223,11 @@ export default async function LeagueDetailPage({
   if (!league) notFound();
   if (!league.userTeamId) redirect(`/dashboard/leagues/${id}/select-team`);
 
+  const espnIdentity = await db.query.platformIdentities.findFirst({
+    where: and(eq(platformIdentities.userId, userId), eq(platformIdentities.platform, "espn")),
+    columns: { id: true },
+  });
+
   const week = await getCurrentNflWeek();
   const scoreOverrides = await getScoreOverrides(userId);
   const { matchup, error } = await loadMatchup(league, userId, week, scoreOverrides);
@@ -235,12 +240,12 @@ export default async function LeagueDetailPage({
     <div className="flex flex-col gap-6">
       {/* Same tab bar as the dashboard itself, not just a "back" link — a
           single matchup is one click deep from any of the three tabs
-          (Overview/Rooting Guide/Outcomes), and losing them entirely down
+          (Overview/Rooting/Outcomes), and losing them entirely down
           here made getting to a different one a two-step trip through the
           dashboard's own Overview tab every time. None highlighted (there's
           no "current tab" once you're not actually on the dashboard); each
           still links straight to that tab via /dashboard?tab=. */}
-      <AppTabsBar activeKey={null} />
+      <AppTabsBar activeKey={null} hasStoredEspnCookies={!!espnIdentity} />
       {/* Header */}
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">

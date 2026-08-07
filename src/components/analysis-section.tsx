@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import type { CrossLeagueAnalysis, RemainingPlayerAnalysis } from "@/lib/leagues/cross-league";
 import type { GameStatus } from "@/lib/leagues/nfl-schedule";
 
@@ -730,122 +731,158 @@ export function WinScenariosSection({
   );
 }
 
-/** A short stretch of chart line with a single exact white bar partway
- * along it — the same shape a card's own line/bar renders, just standing
- * alone as a small illustration rather than describing it in words only. */
-function ExactBarVisual() {
+/** One looping shape instead of two static side-by-side ones — the wide,
+ * striped "uncertain" box visibly narrows down into the thin "exact" bar
+ * and back, the same way a real card's own box narrows as other starters
+ * finish and stop being able to move the threshold. SMIL <animate>, not
+ * CSS/JS — self-contained in the SVG, same zero-dependency style as the
+ * two static visuals above. keyTimes hold each extreme briefly (0-30%,
+ * 45-80%) rather than animating continuously, so it reads as two distinct
+ * states with a transition, not a constant wobble. */
+function ThresholdNarrowingAnimation() {
+  const DUR = "3.2s";
+  const KEY_TIMES = "0; 0.3; 0.5; 0.8; 1";
   return (
-    <svg viewBox="0 0 100 10" className="h-3 w-20 shrink-0 overflow-visible" aria-hidden="true">
-      <line x1={0} y1={5} x2={45} y2={5} stroke={CARD_LOSS_COLOR} strokeWidth={1.5} vectorEffect="non-scaling-stroke" />
-      <line x1={45} y1={5} x2={100} y2={5} stroke={CARD_WIN_COLOR} strokeWidth={1.5} vectorEffect="non-scaling-stroke" />
-      <line
-        x1={45}
-        y1={0}
-        x2={45}
-        y2={10}
-        className="stroke-foreground"
-        strokeWidth={1.5}
-        vectorEffect="non-scaling-stroke"
-      />
-    </svg>
-  );
-}
-
-/** Same idea, but a wider uncertain box (with its diagonal stripe) in place
- * of the single bar — the other real shape a card's line can show. */
-function UncertainBoxVisual() {
-  return (
-    <svg viewBox="0 0 100 10" className="h-3 w-20 shrink-0 overflow-visible" aria-hidden="true">
+    <svg viewBox="0 0 100 10" className="h-4 w-28 shrink-0 overflow-visible" aria-hidden="true">
       <defs>
-        <pattern id="how-it-works-stripe" width={2.4} height={2.4} patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+        <pattern id="how-it-works-anim-stripe" width={2.4} height={2.4} patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
           <rect x={0} width={1.2} height={2.4} fill={CARD_LOSS_COLOR} />
           <rect x={1.2} width={1.2} height={2.4} fill={CARD_WIN_COLOR} />
         </pattern>
       </defs>
-      <line x1={0} y1={5} x2={38} y2={5} stroke={CARD_LOSS_COLOR} strokeWidth={1.5} vectorEffect="non-scaling-stroke" />
-      <line x1={62} y1={5} x2={100} y2={5} stroke={CARD_WIN_COLOR} strokeWidth={1.5} vectorEffect="non-scaling-stroke" />
-      <rect x={38} y={4.4} width={24} height={1.2} fill="url(#how-it-works-stripe)" />
-      <rect
-        x={38}
-        y={0.5}
-        width={24}
-        height={9}
-        fill="none"
-        className="stroke-foreground"
-        strokeWidth={1.5}
-        vectorEffect="non-scaling-stroke"
-      />
+      <line x1={0} y1={5} x2={38} y2={5} stroke={CARD_LOSS_COLOR} strokeWidth={1.5} vectorEffect="non-scaling-stroke">
+        <animate attributeName="x2" values="38; 38; 45; 45; 38" keyTimes={KEY_TIMES} dur={DUR} repeatCount="indefinite" />
+      </line>
+      <line x1={100} y1={5} x2={62} y2={5} stroke={CARD_WIN_COLOR} strokeWidth={1.5} vectorEffect="non-scaling-stroke">
+        <animate attributeName="x2" values="62; 62; 45; 45; 62" keyTimes={KEY_TIMES} dur={DUR} repeatCount="indefinite" />
+      </line>
+      <rect y={4.4} height={1.2} fill="url(#how-it-works-anim-stripe)">
+        <animate attributeName="x" values="38; 38; 45; 45; 38" keyTimes={KEY_TIMES} dur={DUR} repeatCount="indefinite" />
+        <animate attributeName="width" values="24; 24; 0; 0; 24" keyTimes={KEY_TIMES} dur={DUR} repeatCount="indefinite" />
+      </rect>
+      <rect y={0.5} height={9} fill="none" className="stroke-foreground" strokeWidth={1.5} vectorEffect="non-scaling-stroke">
+        <animate attributeName="x" values="38; 38; 45; 45; 38" keyTimes={KEY_TIMES} dur={DUR} repeatCount="indefinite" />
+        <animate attributeName="width" values="24; 24; 0; 0; 24" keyTimes={KEY_TIMES} dur={DUR} repeatCount="indefinite" />
+      </rect>
+      {/* The box's own outline rect above collapses to zero width at the
+          "exact" extreme, which on its own just makes the shape vanish —
+          same gap ExactBarVisual's single vertical line filled for the
+          static version. Same line here, faded in only once the box has
+          actually finished narrowing (and back out before it widens again)
+          so the shape always reads as "a box" or "a bar," never "nothing." */}
+      <line x1={45} y1={0} x2={45} y2={10} className="stroke-foreground" strokeWidth={1.5} vectorEffect="non-scaling-stroke" opacity={0}>
+        <animate attributeName="opacity" values="0; 0; 1; 1; 0" keyTimes={KEY_TIMES} dur={DUR} repeatCount="indefinite" />
+      </line>
     </svg>
   );
 }
 
-/** Collapsed by default so it doesn't compete with the cards themselves. */
-function HowItWorksGuide() {
-  return (
-    <details className="group rounded-xl border border-border bg-card p-4 text-sm">
-      <summary className="flex cursor-pointer items-center justify-between gap-2 font-semibold [&::-webkit-details-marker]:hidden">
-        How this page works
-        <span className="text-muted-foreground transition-transform group-open:rotate-180">▾</span>
-      </summary>
-      <div className="mt-4 flex flex-col gap-4 text-muted-foreground">
-        <div>
-          <p className="font-medium text-foreground">Overlap &amp; conflicts</p>
-          <p className="mt-1">
-            The same player can show up in more than one of your leagues, either as your starter
-            in one or an opponent&apos;s in another. Rooting for a big game from them
-            can help one league while hurting another.
-          </p>
+/** Portaled modal, not an inline dropdown — a "?" button at the end of the
+ * filter row takes up no permanent space in the sticky bar the way the old
+ * collapsible did whenever it was left open, and matches the rest of the
+ * app's own modal pattern (see AddLeagueButton). */
+function HowItWorksButton() {
+  const [open, setOpen] = useState(false);
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => {
+    queueMicrotask(() => setMounted(true));
+  }, []);
+
+  useEffect(() => {
+    if (!open) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [open]);
+
+  const modal = open && (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) setOpen(false);
+      }}
+    >
+      <div className="flex max-h-[85dvh] w-full max-w-lg flex-col overflow-hidden rounded-xl border border-border bg-card text-foreground">
+        <div className="flex shrink-0 items-center justify-between border-b border-border px-4 py-3">
+          <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+            How this page works
+          </h2>
+          <button
+            type="button"
+            onClick={() => setOpen(false)}
+            aria-label="Close"
+            className="rounded-md p-1 text-muted-foreground outline-none ring-ring hover:bg-muted hover:text-foreground focus-visible:ring-2"
+          >
+            ✕
+          </button>
         </div>
-        <div>
-          <p className="font-medium text-foreground">The threshold</p>
-          <p className="mt-1">
-            For each league on the card, there&apos;s a break-even point: the score this player
-            needs (or needs to stay under, if they&apos;re an opponent&apos;s starter) for that
-            league to flip to a win.
-          </p>
-        </div>
-        <div className="flex flex-col gap-2">
-          <p className="font-medium text-foreground">Uncertainty</p>
-          <div className="flex items-center gap-3">
-            <ExactBarVisual />
-            <p>
-              A plain bar means the threshold is exact — nothing else left in that league could
-              still move it.
-            </p>
+        <div className="min-h-0 flex-1 overflow-y-auto p-4 text-sm">
+          <div className="flex flex-col gap-4 text-muted-foreground">
+            <div>
+              <p className="font-medium text-foreground">Overlap &amp; conflicts</p>
+              <p className="mt-1">
+                Rostered as your starter in one league and an opponent&apos;s in another? Rooting
+                for them helps one, hurts the other.
+              </p>
+            </div>
+            <div>
+              <p className="font-medium text-foreground">The threshold</p>
+              <p className="mt-1">
+                Each league gets a break-even point: what this player needs (or must stay under,
+                as an opponent&apos;s starter) to flip that league to a win.
+              </p>
+            </div>
+            <div className="flex flex-col gap-2">
+              <p className="font-medium text-foreground">Uncertainty</p>
+              <div className="flex items-center gap-3">
+                <ThresholdNarrowingAnimation />
+                <p>
+                  A wide, striped box means other starters could still move the threshold; it
+                  narrows to a thin bar as they finish and lock it in.
+                </p>
+              </div>
+            </div>
+            <div>
+              <p className="font-medium text-foreground">The legend</p>
+              <p className="mt-1">
+                Each color below the chart is one win/loss combination. Click one to see it on the
+                league chips — green for a win, red for a loss.
+              </p>
+            </div>
+            <div>
+              <p className="font-medium text-foreground">The score chip &amp; league chips</p>
+              <p className="mt-1">
+                The number under a player&apos;s name is their current score, averaged across
+                leagues if it differs.
+              </p>
+            </div>
+            <div>
+              <p className="font-medium text-foreground">Looking for one player?</p>
+              <p className="mt-1">
+                Check the Rooting tab — it lists every league they&apos;re rostered in and
+                whether they&apos;re helping or hurting you in each.
+              </p>
+            </div>
           </div>
-          <div className="flex items-center gap-3">
-            <UncertainBoxVisual />
-            <p>
-              A wider, striped box means other starters (on either side) are still live, and
-              their own variance could still shift where the real threshold lands.
-            </p>
-          </div>
-        </div>
-        <div>
-          <p className="font-medium text-foreground">The legend</p>
-          <p className="mt-1">
-            The colored squares under a card&apos;s chart are its distinct win/loss combinations.
-            Click one to see exactly what it means: the league chips below border green for the
-            leagues it wins and red for the leagues it loses.
-          </p>
-        </div>
-        <div>
-          <p className="font-medium text-foreground">The score chip &amp; league chips</p>
-          <p className="mt-1">
-            The number under each player&apos;s name is their current score — averaged if the
-            same real player scores differently across leagues (different scoring settings).
-          </p>
-        </div>
-        <div>
-          <p className="font-medium text-foreground">Player search</p>
-          <p className="mt-1">
-            Use the search bar below to jump straight to one player&apos;s card, or head to the
-            Rooting Guide tab to see every league they&apos;re rostered in and whether
-            they&apos;re helping or hurting you in each.
-          </p>
         </div>
       </div>
-    </details>
+    </div>
+  );
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        aria-label="How this page works"
+        className="flex size-9 shrink-0 items-center justify-center rounded-lg border border-border text-sm font-semibold text-muted-foreground outline-none ring-border transition-colors hover:border-foreground hover:text-foreground focus-visible:ring-2"
+      >
+        ?
+      </button>
+      {mounted ? createPortal(modal, document.body) : null}
+    </>
   );
 }
 
@@ -855,78 +892,82 @@ const STATUS_FILTERS: { key: GameStatus; label: string }[] = [
   { key: "post", label: "Final" },
 ];
 
+/** Same fix, same reason, as the main app tabs' own TAB_FLEX_CLASS: forced
+ * equal thirds wrapped "Yet to Play" — the longest label — onto two lines
+ * on a narrow phone, making that one box visibly taller than "Live"/
+ * "Final" next to it. Grow each in proportion to its own label length
+ * below `sm`, snap to equal thirds at `sm` and up — literal arbitrary-value
+ * classes (not inline flex-grow) so the sm: media-query variant can
+ * actually override it; an inline style's specificity would always win
+ * regardless of breakpoint. */
+const STATUS_FILTER_FLEX_CLASS: Record<GameStatus, string> = {
+  pre: "flex-[11] sm:flex-1",
+  in: "flex-[4] sm:flex-1",
+  post: "flex-[5] sm:flex-1",
+};
+
 function PlayerOutcomesSection({
   players,
 }: {
   players: RemainingPlayerAnalysis[];
 }) {
-  const [search, setSearch] = useState("");
   // "Yet to Play" default — the pending-decision cards are the ones a
   // reader actually needs to act/root on right now; already-final ones are
   // just a record at that point.
   const [statusFilter, setStatusFilter] = useState<GameStatus>("pre");
 
-  const visible = players.filter((p) => {
-    if (p.status !== statusFilter) return false;
-    if (search && !p.name.toLowerCase().includes(search.toLowerCase())) return false;
-    return true;
-  });
+  const visible = players.filter((p) => p.status === statusFilter);
 
   return (
     <div className="flex flex-col gap-4">
-      <HowItWorksGuide />
       {/* Sticky right below the app tabs bar (stacking on ITS OWN live
           --tabs-height/--site-header-height measurements — see
-          ElementHeightVar) — search and the status filter are how you keep
-          finding what you need as you scroll a long players list, so they
-          stay put; the how-it-works guide above is one-time reading, not
-          something you need parked on screen, so it's free to scroll away
-          normally. -mx-4/px-4 cancels this section's ancestors' horizontal
-          padding the same way the tabs bar cancels <main>'s, so the solid
-          background spans edge to edge instead of leaving the page's side
-          margins see-through. */}
+          ElementHeightVar) — the status filter is how you keep finding what
+          you need as you scroll a long players list, so it stays put. The
+          how-it-works content lives in a modal (see HowItWorksButton) —
+          a permanent, no-space "?" at the end of this row rather than a
+          collapsible that used to sit above it and eat scroll space
+          whenever left open. -mx-4/px-4 cancels this section's ancestors'
+          horizontal padding the same way the tabs bar cancels <main>'s, so
+          the solid background spans edge to edge instead of leaving the
+          page's side margins see-through. No top margin/gap of its own
+          above this bar — IntelTabs deliberately leaves zero gap before the
+          Outcomes tab's content for exactly this reason; see the comment
+          there for why a nonzero gap (even one partly clawed back with a
+          negative margin) reads as space "squeezing" shut once this bar's
+          sticky offset engages and catches the tabs bar during a scroll. */}
       <div
-        className="sticky z-10 -mx-4 flex flex-col gap-3 border-b border-border bg-background px-4 py-3"
+        className="sticky z-10 -mx-4 flex gap-2 border-b border-border bg-background px-4 py-3"
         style={{ top: "calc(var(--site-header-height, 69px) + var(--tabs-height, 49px))" }}
       >
-        <input
-          type="text"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search players…"
-          className="rounded-lg border border-border bg-card px-3 py-1.5 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-border"
-        />
-        <div className="flex gap-2">
-          {STATUS_FILTERS.map((f) => (
-            <button
-              key={f.key}
-              type="button"
-              aria-pressed={statusFilter === f.key}
-              onClick={() => setStatusFilter(f.key)}
-              // Same border-outline-not-fill language as the score chip and
-              // the league badges elsewhere on this tab (border-2
-              // border-foreground) — a solid fill flips between a jarring
-              // black-on-white/white-on-black block depending on theme;
-              // a foreground border reads as "selected" just as clearly
-              // without that. border-2 on BOTH states (only the color
-              // changes) so selecting a filter doesn't nudge its neighbors
-              // by the 1px a border-1-to-2 switch would.
-              className={`flex-1 rounded-md border-2 px-3 py-1.5 text-sm font-medium transition-colors ${
-                statusFilter === f.key
-                  ? "border-foreground text-foreground"
-                  : "border-border text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              {f.label}
-            </button>
-          ))}
-        </div>
+        {STATUS_FILTERS.map((f) => (
+          <button
+            key={f.key}
+            type="button"
+            aria-pressed={statusFilter === f.key}
+            onClick={() => setStatusFilter(f.key)}
+            // Same border-outline-not-fill language as the score chip and
+            // the league badges elsewhere on this tab (border-2
+            // border-foreground) — a solid fill flips between a jarring
+            // black-on-white/white-on-black block depending on theme;
+            // a foreground border reads as "selected" just as clearly
+            // without that. border-2 on BOTH states (only the color
+            // changes) so selecting a filter doesn't nudge its neighbors
+            // by the 1px a border-1-to-2 switch would.
+            className={`whitespace-nowrap rounded-md border-2 px-2 py-1 text-sm font-medium transition-colors sm:px-3 sm:py-1.5 ${STATUS_FILTER_FLEX_CLASS[f.key]} ${
+              statusFilter === f.key
+                ? "border-foreground text-foreground"
+                : "border-border text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            {f.label}
+          </button>
+        ))}
+        <HowItWorksButton />
       </div>
       {visible.length === 0 ? (
         <p className="rounded-xl border border-dashed border-border p-8 text-center text-sm text-muted-foreground">
-          {search
-            ? `No players match "${search}".`
-            : `No players are ${STATUS_FILTERS.find((f) => f.key === statusFilter)?.label.toLowerCase()}.`}
+          No players are {STATUS_FILTERS.find((f) => f.key === statusFilter)?.label.toLowerCase()}.
         </p>
       ) : (
         <div className="grid gap-3 sm:grid-cols-2">

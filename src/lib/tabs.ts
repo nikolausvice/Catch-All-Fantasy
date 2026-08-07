@@ -6,7 +6,7 @@
  * plain function. */
 export const TABS = [
   { key: "overview", label: "Overview" },
-  { key: "players", label: "Rooting Guide" },
+  { key: "players", label: "Rooting" },
   { key: "outcomes", label: "Outcomes" },
 ] as const;
 
