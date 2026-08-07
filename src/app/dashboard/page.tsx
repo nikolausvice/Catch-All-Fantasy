@@ -271,13 +271,15 @@ function MatchupCard({
         <TeamRow name="Bye" avatarUrl={null} score={null} isBye />
       )}
 
-      {matchup.opponent && (
-        <p className="mt-3 text-center text-[11px] text-muted-foreground">
-          {remainingCount === 0
-            ? "All players have finished"
-            : `${remainingCount} player${remainingCount === 1 ? "" : "s"} left to play`}
-        </p>
-      )}
+      {/* Always rendered, bye week or not — an opponent-less matchup still has
+          the team's own players out there playing, and omitting this line
+          left the bye-week card visibly shorter than every other card in the
+          grid. */}
+      <p className="mt-3 text-center text-[11px] text-muted-foreground">
+        {remainingCount === 0
+          ? "All players have finished"
+          : `${remainingCount} player${remainingCount === 1 ? "" : "s"} left to play`}
+      </p>
     </Link>
   );
 }

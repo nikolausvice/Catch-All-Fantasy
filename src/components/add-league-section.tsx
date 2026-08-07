@@ -1,8 +1,16 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { ConnectSleeperForm } from "./connect-sleeper-form";
 import { ConnectEspnForm } from "./connect-espn-form";
+
+/** Lets a single top-level "← Back" button pop exactly one step out of a
+ * form's own internal navigation (e.g. ESPN's public/private choice, or a
+ * found-leagues list) before falling back to whatever's above it. `back()`
+ * returns true if it consumed the press by popping an internal step, or
+ * false if there was nothing left to pop — signaling the caller to handle
+ * going back itself. */
+export type BackHandle = { back: () => boolean };
 
 type Platform = "sleeper" | "espn";
 
@@ -10,17 +18,23 @@ const PLATFORMS: { id: Platform; label: string; description: string }[] = [
   {
     id: "sleeper",
     label: "Sleeper",
-    description: "Just your username — no credentials needed.",
+    description: "",
   },
   {
     id: "espn",
     label: "ESPN",
-    description: "League ID + optional cookies for private leagues.",
+    description: "",
   },
 ];
 
 export function AddLeagueSection({ hasStoredEspnCookies }: { hasStoredEspnCookies: boolean }) {
   const [selected, setSelected] = useState<Platform | null>(null);
+  const platformFormRef = useRef<BackHandle>(null);
+
+  function handleBack() {
+    if (platformFormRef.current?.back()) return;
+    setSelected(null);
+  }
 
   return (
     <div>
@@ -55,7 +69,7 @@ export function AddLeagueSection({ hasStoredEspnCookies }: { hasStoredEspnCookie
         ) : (
           <div>
             <button
-              onClick={() => setSelected(null)}
+              onClick={handleBack}
               className="mb-4 text-sm text-muted-foreground hover:text-foreground"
             >
               ← Back
@@ -63,19 +77,14 @@ export function AddLeagueSection({ hasStoredEspnCookies }: { hasStoredEspnCookie
 
             {selected === "sleeper" && (
               <div>
-                <h3 className="mb-1 text-sm font-semibold">Connect Sleeper</h3>
-                <p className="mb-4 text-sm text-muted-foreground">
-                  Just your username — Sleeper&apos;s API is public and
-                  read-only.
-                </p>
-                <ConnectSleeperForm />
+                <ConnectSleeperForm ref={platformFormRef} />
               </div>
             )}
 
             {selected === "espn" && (
               <div>
                 <h3 className="mb-4 text-sm font-semibold">Connect ESPN</h3>
-                <ConnectEspnForm hasStoredCookies={hasStoredEspnCookies} />
+                <ConnectEspnForm ref={platformFormRef} hasStoredCookies={hasStoredEspnCookies} />
               </div>
             )}
           </div>

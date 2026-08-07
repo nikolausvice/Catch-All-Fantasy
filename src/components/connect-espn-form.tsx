@@ -1,6 +1,14 @@
 "use client";
 
-import { startTransition, useActionState, useState, useTransition } from "react";
+import {
+  startTransition,
+  useActionState,
+  useImperativeHandle,
+  useRef,
+  useState,
+  useTransition,
+  type Ref,
+} from "react";
 import {
   connectEspnAccount,
   connectEspnLeagues,
@@ -9,6 +17,7 @@ import {
   type EspnLookupState,
 } from "@/app/dashboard/actions";
 import { EspnLiveLogin } from "@/components/espn-live-login";
+import type { BackHandle } from "@/components/add-league-section";
 
 type EspnLoginResult =
   | { status: "success"; espnS2: string; swid: string }
@@ -24,9 +33,11 @@ type EspnLoginResult =
 function EspnBackgroundLogin({
   onCookies,
   onNeedsLiveLogin,
+  ref,
 }: {
   onCookies: (espnS2: string, swid: string) => void;
   onNeedsLiveLogin: () => void;
+  ref?: Ref<BackHandle>;
 }) {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -34,6 +45,20 @@ function EspnBackgroundLogin({
   const [error, setError] = useState<string | null>(null);
   const [otpSessionId, setOtpSessionId] = useState<string | null>(null);
   const [code, setCode] = useState("");
+
+  // Exposed up the chain (see add-league-section.tsx's BackHandle) so the
+  // single top-level "← Back" button can cancel an in-progress verification
+  // code prompt, one step at a time, instead of only the local "Cancel" link
+  // being able to.
+  useImperativeHandle(ref, () => ({
+    back: () => {
+      if (otpSessionId) {
+        cancelOtp();
+        return true;
+      }
+      return false;
+    },
+  }));
 
   async function submit() {
     setPending(true);
@@ -328,9 +353,40 @@ function SavedEspnLoginBanner({
   );
 }
 
-export function ConnectEspnForm({ hasStoredCookies }: { hasStoredCookies: boolean }) {
+export function ConnectEspnForm({
+  hasStoredCookies,
+  ref,
+}: {
+  hasStoredCookies: boolean;
+  ref?: Ref<BackHandle>;
+}) {
   const [visibility, setVisibility] = useState<"private" | "public" | null>(null);
   const [manualFallback, setManualFallback] = useState(false);
+  const lookupFlowRef = useRef<BackHandle>(null);
+
+  // Exposed to the single top-level "← Back" button (see
+  // add-league-section.tsx): pop the manual-entry fallback, then delegate to
+  // the lookup flow's own steps, then the public/private choice — one step
+  // at a time — before telling the caller (the platform picker) there's
+  // nothing left to pop here.
+  useImperativeHandle(ref, () => ({
+    back: () => {
+      if (manualFallback) {
+        setManualFallback(false);
+        return true;
+      }
+      if (visibility === "private") {
+        if (lookupFlowRef.current?.back()) return true;
+        setVisibility(null);
+        return true;
+      }
+      if (visibility === "public") {
+        setVisibility(null);
+        return true;
+      }
+      return false;
+    },
+  }));
 
   if (visibility === null) {
     return (
@@ -344,7 +400,7 @@ export function ConnectEspnForm({ hasStoredCookies }: { hasStoredCookies: boolea
           >
             <span className="font-semibold">Private league</span>
             <span className="text-xs text-muted-foreground">
-              Most leagues. Sign in with ESPN — no ID or season to look up.
+              Most leagues. Sign in with ESPN.
             </span>
           </button>
           <button
@@ -354,7 +410,7 @@ export function ConnectEspnForm({ hasStoredCookies }: { hasStoredCookies: boolea
           >
             <span className="font-semibold">Public league</span>
             <span className="text-xs text-muted-foreground">
-              Anyone can view it without logging in. Just paste the league ID.
+              Anyone can view without logging in.
             </span>
           </button>
         </div>
@@ -366,13 +422,6 @@ export function ConnectEspnForm({ hasStoredCookies }: { hasStoredCookies: boolea
     return (
       <div className="flex flex-col gap-3">
         <PublicEspnLeagueForm />
-        <button
-          type="button"
-          onClick={() => setVisibility(null)}
-          className="self-start text-sm text-muted-foreground hover:text-foreground"
-        >
-          ← Back
-        </button>
       </div>
     );
   }
@@ -381,13 +430,6 @@ export function ConnectEspnForm({ hasStoredCookies }: { hasStoredCookies: boolea
     return (
       <div className="flex flex-col gap-3">
         <ConnectEspnManualForm hasStoredCookies={hasStoredCookies} />
-        <button
-          type="button"
-          onClick={() => setManualFallback(false)}
-          className="self-start text-sm text-muted-foreground hover:text-foreground"
-        >
-          ← Back to sign-in
-        </button>
       </div>
     );
   }
@@ -395,9 +437,9 @@ export function ConnectEspnForm({ hasStoredCookies }: { hasStoredCookies: boolea
   return (
     <div className="flex flex-col gap-3">
       <EspnLookupFlow
+        ref={lookupFlowRef}
         hasStoredCookies={hasStoredCookies}
         onManual={() => setManualFallback(true)}
-        onBack={() => setVisibility(null)}
       />
     </div>
   );
@@ -470,11 +512,11 @@ function PublicEspnLeagueForm() {
 function EspnLookupFlow({
   hasStoredCookies,
   onManual,
-  onBack,
+  ref,
 }: {
   hasStoredCookies: boolean;
   onManual: () => void;
-  onBack: () => void;
+  ref?: Ref<BackHandle>;
 }) {
   const [lookupState, lookupAction, lookupPending] = useActionState(lookupEspnLeagues, {
     error: null,
@@ -489,8 +531,27 @@ function EspnLookupFlow({
   const [showCookieFields, setShowCookieFields] = useState(!hasStoredCookies);
   const [restarted, setRestarted] = useState(false);
   const [liveLogin, setLiveLogin] = useState(false);
+  const backgroundLoginRef = useRef<BackHandle>(null);
 
   const result = lookupState.result;
+
+  // Exposed up the chain: pop the found-leagues list back to the login
+  // step, then exit live sign-in, then delegate to the login form's own
+  // pending state (e.g. an in-progress OTP prompt) — one step at a time —
+  // before finally telling the caller there's nothing left to pop here.
+  useImperativeHandle(ref, () => ({
+    back: () => {
+      if (result && !restarted) {
+        setRestarted(true);
+        return true;
+      }
+      if (liveLogin) {
+        setLiveLogin(false);
+        return true;
+      }
+      return backgroundLoginRef.current?.back() ?? false;
+    },
+  }));
 
   // Track which lookup result the checkbox selection belongs to, so a fresh
   // lookup re-defaults to "all selected" but deselecting on the CURRENT
@@ -547,7 +608,11 @@ function EspnLookupFlow({
           <EspnLiveLogin onCookies={handleCookies} onCancel={() => setLiveLogin(false)} />
         ) : (
           <div className="flex flex-col gap-3">
-            <EspnBackgroundLogin onCookies={handleCookies} onNeedsLiveLogin={() => setLiveLogin(true)} />
+            <EspnBackgroundLogin
+              ref={backgroundLoginRef}
+              onCookies={handleCookies}
+              onNeedsLiveLogin={() => setLiveLogin(true)}
+            />
 
             <details className="text-sm">
               <summary className="cursor-pointer select-none text-muted-foreground hover:text-foreground">
@@ -640,14 +705,6 @@ function EspnLookupFlow({
         {lookupState.error && (
           <p className="text-sm text-destructive">{lookupState.error}</p>
         )}
-
-        <button
-          type="button"
-          onClick={onBack}
-          className="self-start text-sm text-muted-foreground hover:text-foreground"
-        >
-          ← Back
-        </button>
       </form>
     );
   }
@@ -709,13 +766,6 @@ function EspnLookupFlow({
           {connectPending
             ? "Adding…"
             : `Add ${selectedKeys.size || ""} league${selectedKeys.size === 1 ? "" : "s"}`}
-        </button>
-        <button
-          type="button"
-          onClick={() => setRestarted(true)}
-          className="text-sm text-muted-foreground hover:text-foreground"
-        >
-          ← Back
         </button>
       </div>
 

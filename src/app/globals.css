@@ -25,16 +25,17 @@
   --outcome-win: #059669;
   --outcome-mid: #d97706;
   --outcome-loss: #ef4444;
-  /* Logged-out surfaces' tan/gold brand accent (see src/lib/brand.ts) —
-     the raw #d3bc8d reads fine on the dark card/background it was picked
-     against, but the same light tan on a near-white light-mode background
-     doesn't have enough contrast to work as text/link/border color. A
-     deeper bronze stands in for it here instead; --brand-accent-foreground
-     flips to match whichever of the two is currently the button fill. */
-  --brand-accent: #8a6a2f;
-  --brand-accent-foreground: #fdf6e8;
-  --brand-accent-soft: rgba(138, 106, 47, 0.12);
-  --brand-accent-border: rgba(138, 106, 47, 0.35);
+  /* Logged-out surfaces' brand accent (see src/lib/brand.ts) — dark mode
+     keeps the original tan/gold (#d3bc8d), but that same light tan on a
+     near-white light-mode background doesn't have enough contrast to work
+     as text/link/border color, and looked muddy once darkened for
+     contrast. A deep navy stands in for it here instead;
+     --brand-accent-foreground flips to match whichever of the two is
+     currently the button fill. */
+  --brand-accent: #1d4e6b;
+  --brand-accent-foreground: #f3f8fb;
+  --brand-accent-soft: rgba(29, 78, 107, 0.1);
+  --brand-accent-border: rgba(29, 78, 107, 0.3);
   /* The "White" entry in the player-card mixed-combo palette
      (MIXED_COMBO_COLORS in analysis-section.tsx) — near-white was picked to
      read against a dark card, but on a light card it's indistinguishable

@@ -50,7 +50,7 @@ export default async function DashboardLayout({
             <RefreshButton />
             <AddLeagueButton
               hasStoredEspnCookies={!!espnIdentity}
-              label="+"
+              label={<span className="text-lg font-semibold leading-none">+</span>}
               ariaLabel="Add league"
               className={cn(headerButtonClass, "w-9 px-0")}
             />

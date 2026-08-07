@@ -208,8 +208,13 @@ async function classifyLoginPage(page: Page): Promise<EspnLoginResult> {
     }
   }
 
-  const bodyText = (await root.locator("body").textContent().catch(() => "")) ?? "";
-  const errorMatch = bodyText.match(/[^.]*\b(incorrect|invalid|doesn't match|didn't match)\b[^.]*\./i);
+  // innerText (not textContent) — it respects rendered layout and inserts line
+  // breaks between block-level elements, so a heading like "Disney account"
+  // immediately followed by a "The credentials you entered are incorrect."
+  // paragraph doesn't get glued into one run of text with no boundary between
+  // them for the regex below to respect.
+  const bodyText = (await root.locator("body").innerText().catch(() => "")) ?? "";
+  const errorMatch = bodyText.match(/[^.\n]*\b(incorrect|invalid|doesn't match|didn't match)\b[^.\n]*\./i);
   return {
     status: "error",
     message: errorMatch?.[0]?.trim() ?? "Couldn't sign in to ESPN — check your username and password.",

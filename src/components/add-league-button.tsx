@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { AddLeagueSection } from "./add-league-section";
 import { headerButtonClass } from "@/lib/utils";
@@ -16,7 +16,7 @@ export function AddLeagueButton({
    * button, a dropdown-menu row, or a big empty-state CTA, without three
    * copies of the modal/portal/escape-key logic to keep in sync. */
   className?: string;
-  label?: string;
+  label?: ReactNode;
   /** Set when `label` alone (e.g. a bare "+") isn't descriptive enough for
    * a screen reader. */
   ariaLabel?: string;

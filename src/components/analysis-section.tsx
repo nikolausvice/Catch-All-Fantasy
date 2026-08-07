@@ -383,8 +383,46 @@ function PlayerOutcomeCard({ entry }: { entry: RemainingPlayerAnalysis }) {
     };
   });
 
+  // The number under each divider is centered on its own threshold with no
+  // regard for its neighbors — fine when they're far apart, but two
+  // thresholds a point or two apart (e.g. 12 and 13) put their digits close
+  // enough in percent-of-axis terms to visually overlap. Declutter by
+  // splitting any shortfall between BOTH labels in a colliding pair (each
+  // nudges half the distance) rather than shoving just the later one — a
+  // smaller, more even correction that still keeps each number as close to
+  // its real threshold as possible. Repeated over a few passes so a shove
+  // that closes one gap can ripple out to the next pair over, same idea as
+  // a chart axis's tick-label collision avoidance.
+  const dividerLabels = dividers
+    .flatMap((d) => {
+      if (d.isSinglePoint) {
+        const value = Math.round(d.leftPoints);
+        return [{ key: `label-${d.key}`, x: d.centerX, value }];
+      }
+      return [
+        { key: `label-start-${d.key}`, x: d.leftX, value: Math.round(d.leftPoints) },
+        { key: `label-end-${d.key}`, x: d.rightX, value: Math.round(d.rightPoints) },
+      ];
+    })
+    .sort((a, b) => a.x - b.x)
+    .map((label) => ({ ...label, text: String(label.value) }));
+  for (let pass = 0; pass < 4; pass++) {
+    for (let i = 1; i < dividerLabels.length; i++) {
+      const prev = dividerLabels[i - 1];
+      const cur = dividerLabels[i];
+      // Percent-of-axis gap sized off each label's own character count — a
+      // 3-digit or negative value needs more breathing room than a bare "3".
+      const minGap = 3.5 + 1.1 * Math.max(prev.text.length, cur.text.length);
+      const shortfall = minGap - (cur.x - prev.x);
+      if (shortfall > 0) {
+        prev.x -= shortfall / 2;
+        cur.x += shortfall / 2;
+      }
+    }
+  }
+
   return (
-    <div className="flex flex-col gap-2 rounded-xl border border-border bg-card p-4">
+    <div className="flex flex-col gap-2 rounded-xl border-2 border-border bg-card p-4">
       <p className="truncate text-center text-sm font-medium">{entry.name}</p>
       {/* Current score, averaged across leagues already (entry.currentPoints).
           Plain chip, not colored by outcome — border-foreground (not a
@@ -517,57 +555,23 @@ function PlayerOutcomeCard({ entry }: { entry: RemainingPlayerAnalysis }) {
         />
       </div>
       <div className="relative h-4 w-full">
-        {dividers.flatMap((d) => {
-          // A single-point divider (isExact, zero-width) has nothing to
-          // range over — one centered number, same as before. A real box
-          // gets ITS ACTUAL start and end labeled instead of one number at
-          // the center, so the range the record could still flip across is
-          // visible, not just implied by the box's width.
-          if (d.isSinglePoint) {
-            const displayValue = Math.round(d.leftPoints);
-            return [
-              <span
-                key={`label-${d.key}`}
-                // Only the "already covered" (negative) case gets colored —
-                // same CARD_LOSS_COLOR as everywhere else on this page. A
-                // normal, still-actionable positive threshold is plain
-                // foreground text, not the win color; it's not calling out
-                // a good/bad outcome, just a number.
-                className="absolute -translate-x-1/2 whitespace-nowrap text-[10px] font-medium leading-none text-foreground"
-                style={{
-                  left: `${d.centerX}%`,
-                  color: displayValue < 0 ? CARD_LOSS_COLOR : undefined,
-                }}
-              >
-                {displayValue}
-              </span>,
-            ];
-          }
-          const startValue = Math.round(d.leftPoints);
-          const endValue = Math.round(d.rightPoints);
-          return [
-            <span
-              key={`label-start-${d.key}`}
-              className="absolute -translate-x-1/2 whitespace-nowrap text-[10px] font-medium leading-none text-foreground"
-              style={{
-                left: `${d.leftX}%`,
-                color: startValue < 0 ? CARD_LOSS_COLOR : undefined,
-              }}
-            >
-              {startValue}
-            </span>,
-            <span
-              key={`label-end-${d.key}`}
-              className="absolute -translate-x-1/2 whitespace-nowrap text-[10px] font-medium leading-none text-foreground"
-              style={{
-                left: `${d.rightX}%`,
-                color: endValue < 0 ? CARD_LOSS_COLOR : undefined,
-              }}
-            >
-              {endValue}
-            </span>,
-          ];
-        })}
+        {dividerLabels.map((label) => (
+          <span
+            key={label.key}
+            // Only the "already covered" (negative) case gets colored —
+            // same CARD_LOSS_COLOR as everywhere else on this page. A
+            // normal, still-actionable positive threshold is plain
+            // foreground text, not the win color; it's not calling out
+            // a good/bad outcome, just a number.
+            className="absolute -translate-x-1/2 whitespace-nowrap text-[10px] font-medium leading-none text-foreground"
+            style={{
+              left: `${label.x}%`,
+              color: label.value < 0 ? CARD_LOSS_COLOR : undefined,
+            }}
+          >
+            {label.value}
+          </span>
+        ))}
       </div>
       {/* Legend for the combo colors above — every card gets one, even a
           single-swatch one (so "there's only one possible outcome here" is

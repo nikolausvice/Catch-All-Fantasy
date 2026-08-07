@@ -1,13 +1,14 @@
 "use client";
 
-import { useActionState, useState } from "react";
+import { useActionState, useImperativeHandle, useState, type Ref } from "react";
 import {
   connectSleeperLeagues,
   lookupSleeperLeagues,
   type SleeperLookupState,
 } from "@/app/dashboard/actions";
+import type { BackHandle } from "./add-league-section";
 
-export function ConnectSleeperForm() {
+export function ConnectSleeperForm({ ref }: { ref?: Ref<BackHandle> }) {
   const [lookupState, lookupAction, lookupPending] = useActionState(lookupSleeperLeagues, {
     error: null,
     result: null,
@@ -28,6 +29,20 @@ export function ConnectSleeperForm() {
   const [selectedFor, setSelectedFor] = useState<SleeperLookupState["result"]>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [restarted, setRestarted] = useState(false);
+
+  // Exposed to the top-level "← Back" button (see add-league-section.tsx):
+  // pop back from the found-leagues list to the lookup form, one step at a
+  // time, instead of that button always jumping straight to the platform
+  // picker.
+  useImperativeHandle(ref, () => ({
+    back: () => {
+      if (result && !restarted) {
+        setRestarted(true);
+        return true;
+      }
+      return false;
+    },
+  }));
 
   if (result !== selectedFor) {
     setSelectedFor(result);
@@ -138,13 +153,6 @@ export function ConnectSleeperForm() {
           {connectPending
             ? "Adding…"
             : `Add ${selectedIds.size || ""} league${selectedIds.size === 1 ? "" : "s"}`}
-        </button>
-        <button
-          type="button"
-          onClick={() => setRestarted(true)}
-          className="text-sm text-muted-foreground hover:text-foreground"
-        >
-          ← Back
         </button>
       </div>
 
