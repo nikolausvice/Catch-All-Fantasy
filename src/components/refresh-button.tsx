@@ -47,8 +47,10 @@ export function RefreshButton() {
       >
         {/* Icon only — no "Refresh" word — since it sits right next to the
             equally compact "+ Add league" and hamburger buttons in the
-            header. */}
-        ↻
+            header. Sized up on its own (rather than via headerButtonClass,
+            shared with those other buttons' text) since a bare glyph reads
+            smaller than actual text at the same font size. */}
+        <span className="text-lg leading-none">↻</span>
       </button>
     </div>
   );
