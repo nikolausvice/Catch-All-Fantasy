@@ -937,7 +937,7 @@ function PlayerOutcomesSection({
           negative margin) reads as space "squeezing" shut once this bar's
           sticky offset engages and catches the tabs bar during a scroll. */}
       <div
-        className="sticky z-10 -mx-4 flex gap-2 border-b border-border bg-background px-4 py-3"
+        className="sticky z-10 -mx-4 flex gap-2 border-b border-border bg-background px-4 py-2"
         style={{ top: "calc(var(--site-header-height, 69px) + var(--tabs-height, 49px))" }}
       >
         {STATUS_FILTERS.map((f) => (
