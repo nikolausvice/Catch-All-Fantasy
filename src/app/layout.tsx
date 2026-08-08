@@ -37,7 +37,15 @@ export default function RootLayout({
       suppressHydrationWarning
       className={`${GeistSans.variable} ${GeistMono.variable} h-full antialiased`}
     >
-      <body className="flex min-h-full flex-col overflow-x-hidden">
+      {/* overflow-x-clip, not overflow-x-hidden — hidden forces the other
+          axis (overflow-y) to compute as auto per the CSS overflow spec,
+          which turns body itself into a scrolling container instead of
+          letting the viewport scroll naturally. On mobile Safari that's a
+          known trigger for broken/glitchy position: sticky (the header
+          detaching while scrolling, stale sticky content ghosting through
+          near scroll boundaries) — clip avoids the side effect while still
+          preventing horizontal overflow. */}
+      <body className="flex min-h-full flex-col overflow-x-clip">
         <ThemeProvider attribute="class" defaultTheme="dark" enableSystem>
           {children}
         </ThemeProvider>
