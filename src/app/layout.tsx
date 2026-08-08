@@ -35,7 +35,15 @@ export default function RootLayout({
       // from complaining that the class it sees on hydration doesn't match
       // whatever was server-rendered here.
       suppressHydrationWarning
-      className={`${GeistSans.variable} ${GeistMono.variable} h-full antialiased`}
+      // overscroll-y-none — html is the real scrolling element (body no
+      // longer establishes its own scroll container, see the overflow-x
+      // comment below), so this is where rubber-band bounce past the top/
+      // bottom edge needs to be suppressed. Without it, dragging past the
+      // end of the page lets iOS Safari's compositor re-layer the stacked
+      // sticky header/tabs/filter bar mid-bounce, which is what was
+      // producing the stale/ghosted sticky content near the bottom of a
+      // long scroll.
+      className={`${GeistSans.variable} ${GeistMono.variable} h-full overscroll-y-none antialiased`}
     >
       {/* overflow-x-clip, not overflow-x-hidden — hidden forces the other
           axis (overflow-y) to compute as auto per the CSS overflow spec,
