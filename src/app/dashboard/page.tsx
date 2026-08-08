@@ -309,10 +309,10 @@ function MatchupsTab({
               return (
                 <li
                   key={league.id}
-                  className="flex min-h-[44px] items-center justify-between gap-3 rounded-xl border border-dashed border-border bg-card p-4"
+                  className="flex flex-col gap-2 rounded-xl border border-dashed border-border bg-card p-4"
                 >
-                  <div className="min-w-0">
-                    <p className="truncate font-medium">{league.leagueName}</p>
+                  <div>
+                    <p className="font-medium break-words">{league.leagueName}</p>
                     <p className="text-xs text-muted-foreground">
                       {PLATFORM_LABEL[league.platform] ?? league.platform} ·{" "}
                       {league.season}
@@ -324,21 +324,23 @@ function MatchupsTab({
                       )}
                     </p>
                   </div>
-                  {needsReconnect ? (
-                    <RemoveLeagueButton
-                      leagueRowId={league.id}
-                      leagueName={league.leagueName}
-                      redirectTo={null}
-                    />
-                  ) : (
-                    <Link
-                      href={`/dashboard/leagues/${league.id}/select-team`}
-                      className="shrink-0 text-xs font-medium hover:underline"
-                      style={{ color: ACCENT }}
-                    >
-                      Pick your team →
-                    </Link>
-                  )}
+                  <div className="flex justify-end">
+                    {needsReconnect ? (
+                      <RemoveLeagueButton
+                        leagueRowId={league.id}
+                        leagueName={league.leagueName}
+                        redirectTo={null}
+                      />
+                    ) : (
+                      <Link
+                        href={`/dashboard/leagues/${league.id}/select-team`}
+                        className="text-xs font-medium hover:underline"
+                        style={{ color: ACCENT }}
+                      >
+                        Pick your team →
+                      </Link>
+                    )}
+                  </div>
                 </li>
               );
             })}
