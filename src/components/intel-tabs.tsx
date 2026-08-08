@@ -108,7 +108,19 @@ export function IntelTabs({
   outcomeLandscape: React.ReactNode;
 }) {
   const [active, setActive] = useState<TabKey>(initialTab ?? "overview");
+  // Which way the most recent switch moved, in tab order — drives which
+  // side the incoming panel below slides in from (see tab-slide-in in
+  // globals.css), independent of *how* the switch happened (tap or swipe).
+  const [direction, setDirection] = useState<1 | -1>(1);
   const touchStartRef = useRef<{ x: number; y: number } | null>(null);
+
+  function goTo(key: TabKey) {
+    const currentIndex = TABS.findIndex((t) => t.key === active);
+    const nextIndex = TABS.findIndex((t) => t.key === key);
+    if (nextIndex === currentIndex) return;
+    setDirection(nextIndex > currentIndex ? 1 : -1);
+    setActive(key);
+  }
 
   // Swipe threshold in px, and how much more horizontal than vertical travel
   // a touch needs before it counts as a tab swipe rather than a vertical
@@ -134,7 +146,7 @@ export function IntelTabs({
     const currentIndex = TABS.findIndex((t) => t.key === active);
     const nextIndex = currentIndex + (dx < 0 ? 1 : -1);
     if (nextIndex >= 0 && nextIndex < TABS.length) {
-      setActive(TABS[nextIndex].key);
+      goTo(TABS[nextIndex].key);
     }
   }
 
@@ -152,7 +164,7 @@ export function IntelTabs({
           the bar reaches its sticky offset and catches the header, reading
           as the gap visibly getting squeezed out while scrolling. Flush
           against the header from the very first frame avoids that. */}
-      <AppTabsBar activeKey={active} onSelect={setActive} hasStoredEspnCookies={hasStoredEspnCookies} />
+      <AppTabsBar activeKey={active} onSelect={goTo} hasStoredEspnCookies={hasStoredEspnCookies} />
 
       {/* No gap between this and the tabs bar above by default — Outcomes'
           own sticky filter bar needs to sit flush against it for the exact
@@ -165,11 +177,34 @@ export function IntelTabs({
           of relying on a gap up here that Outcomes can't also use safely.
           Touch handlers here (not on the outer div) let left/right swipes
           switch tabs the same way tapping AppTabsBar does, while vertical
-          scrolling within the content is untouched. */}
-      <div onTouchStart={handleTouchStart} onTouchEnd={handleTouchEnd}>
-        {active === "overview" && <div className="flex flex-col gap-8 pt-5">{overview}</div>}
-        {active === "players" && <div className="flex flex-col gap-8 pt-5">{rootingAndOverlap}</div>}
-        {active === "outcomes" && <div className="flex flex-col gap-8">{outcomeLandscape}</div>}
+          scrolling within the content is untouched. overflow-x-clip (not
+          -hidden) hides the panel's brief off-screen slide-in offset below
+          without also touching the y axis — plain overflow-hidden sets
+          *both* axes non-visible (the old overflow-x/y "visible pairs with
+          the other axis" quirk clip was added specifically to avoid), which
+          would turn this into a scroll container on y too and hijack
+          Outcomes' own sticky filter row to stick to this box instead of
+          the page. */}
+      <div onTouchStart={handleTouchStart} onTouchEnd={handleTouchEnd} className="overflow-x-clip">
+        {/* Keyed by tab so React remounts (not patches) the panel on every
+            switch — that's what makes the slide-in animation below replay
+            each time instead of only firing once. --tab-slide-from picks
+            which side it enters from, set per switch from `direction` so a
+            swipe/tap moving right through the tabs slides the new panel in
+            from the right, and moving left slides it in from the left —
+            same as a native swipeable card stack (e.g. Instagram's own
+            tab-switch), just animating the incoming panel alone rather than
+            dragging both panels in lockstep, so a shorter tab's content
+            never gets stretched to a taller sibling's height. */}
+        <div
+          key={active}
+          style={{ "--tab-slide-from": direction === 1 ? "40px" : "-40px" } as React.CSSProperties}
+          className="animate-[tab-slide-in_260ms_ease-out]"
+        >
+          {active === "overview" && <div className="flex flex-col gap-8 pt-5">{overview}</div>}
+          {active === "players" && <div className="flex flex-col gap-8 pt-5">{rootingAndOverlap}</div>}
+          {active === "outcomes" && <div className="flex flex-col gap-8">{outcomeLandscape}</div>}
+        </div>
       </div>
     </div>
   );

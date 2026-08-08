@@ -104,6 +104,20 @@ body {
   }
 }
 
+/* Incoming-panel motion for IntelTabs' Overview/Rooting/Outcomes switch —
+   --tab-slide-from is set per switch (see intel-tabs.tsx) to +/-40px so the
+   panel slides in from whichever side matches the tap/swipe direction. */
+@keyframes tab-slide-in {
+  from {
+    transform: translateX(var(--tab-slide-from, 40px));
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
 /* Chrome/Safari paint autofilled inputs with their own opaque (usually white) background,
    ignoring the page's — the long transition delay is the standard trick to stop that paint
    from ever showing before we override it with an inset box-shadow of our own card color. */
