@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import Link from "next/link";
 import { AddLeagueButton } from "@/components/add-league-button";
 import { ElementHeightVar } from "@/components/element-height-var";
@@ -108,6 +108,35 @@ export function IntelTabs({
   outcomeLandscape: React.ReactNode;
 }) {
   const [active, setActive] = useState<TabKey>(initialTab ?? "overview");
+  const touchStartRef = useRef<{ x: number; y: number } | null>(null);
+
+  // Swipe threshold in px, and how much more horizontal than vertical travel
+  // a touch needs before it counts as a tab swipe rather than a vertical
+  // scroll — without the ratio check, a mostly-vertical scroll with a tiny
+  // horizontal wobble would otherwise flip tabs by accident.
+  const SWIPE_THRESHOLD = 60;
+
+  function handleTouchStart(e: React.TouchEvent) {
+    const touch = e.touches[0];
+    touchStartRef.current = { x: touch.clientX, y: touch.clientY };
+  }
+
+  function handleTouchEnd(e: React.TouchEvent) {
+    const start = touchStartRef.current;
+    touchStartRef.current = null;
+    if (!start) return;
+
+    const touch = e.changedTouches[0];
+    const dx = touch.clientX - start.x;
+    const dy = touch.clientY - start.y;
+    if (Math.abs(dx) < SWIPE_THRESHOLD || Math.abs(dx) < Math.abs(dy) * 1.5) return;
+
+    const currentIndex = TABS.findIndex((t) => t.key === active);
+    const nextIndex = currentIndex + (dx < 0 ? 1 : -1);
+    if (nextIndex >= 0 && nextIndex < TABS.length) {
+      setActive(TABS[nextIndex].key);
+    }
+  }
 
   return (
     <div className="flex flex-col">
@@ -133,10 +162,15 @@ export function IntelTabs({
           filter bar's own sticky offset engages and catches the tabs bar.
           Overview/Rooting have no sticky element of their own
           immediately inside them, so they add their own pt-5 back instead
-          of relying on a gap up here that Outcomes can't also use safely. */}
-      {active === "overview" && <div className="flex flex-col gap-8 pt-5">{overview}</div>}
-      {active === "players" && <div className="flex flex-col gap-8 pt-5">{rootingAndOverlap}</div>}
-      {active === "outcomes" && <div className="flex flex-col gap-8">{outcomeLandscape}</div>}
+          of relying on a gap up here that Outcomes can't also use safely.
+          Touch handlers here (not on the outer div) let left/right swipes
+          switch tabs the same way tapping AppTabsBar does, while vertical
+          scrolling within the content is untouched. */}
+      <div onTouchStart={handleTouchStart} onTouchEnd={handleTouchEnd}>
+        {active === "overview" && <div className="flex flex-col gap-8 pt-5">{overview}</div>}
+        {active === "players" && <div className="flex flex-col gap-8 pt-5">{rootingAndOverlap}</div>}
+        {active === "outcomes" && <div className="flex flex-col gap-8">{outcomeLandscape}</div>}
+      </div>
     </div>
   );
 }
