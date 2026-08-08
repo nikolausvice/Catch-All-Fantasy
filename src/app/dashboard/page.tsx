@@ -23,6 +23,7 @@ import {
 import { getScoreOverrides } from "@/lib/leagues/score-overrides";
 import { getCurrentNflWeek } from "@/lib/leagues/week";
 import { loadMatchup } from "./_load-matchup";
+import { loadTeamCount } from "./_load-team-count";
 import type { LeagueMatchup } from "@/lib/leagues/types";
 
 const PLATFORM_LABEL: Record<string, string> = {
@@ -288,11 +289,13 @@ function MatchupCard({
 function MatchupsTab({
   needsSetup,
   needsReconnectIds,
+  teamCounts,
   matchups,
   statusByTeam,
 }: {
   needsSetup: LeagueRow[];
   needsReconnectIds: Set<string>;
+  teamCounts: Map<string, number>;
   matchups: { league: LeagueRow; matchup: LeagueMatchup | null; error: string | null }[];
   statusByTeam: Map<string, GameStatus>;
 }) {
@@ -323,6 +326,11 @@ function MatchupsTab({
                         </span>
                       )}
                     </p>
+                    {teamCounts.has(league.id) && (
+                      <p className="text-xs text-muted-foreground">
+                        {teamCounts.get(league.id)} teams
+                      </p>
+                    )}
                   </div>
                   <div className="flex justify-end">
                     {needsReconnect ? (
@@ -408,6 +416,16 @@ export default async function DashboardPage({
       .map((l) => l.id),
   );
 
+  const teamCounts = new Map<string, number>();
+  await Promise.all(
+    needsSetup
+      .filter((league) => !needsReconnectIds.has(league.id))
+      .map(async (league) => {
+        const count = await loadTeamCount(league, userId);
+        if (count !== null) teamCounts.set(league.id, count);
+      }),
+  );
+
   const week = ready.length > 0 ? await getCurrentNflWeek() : 0;
   const season = Number(ready.find((l) => l.platform !== "demo")?.season) || new Date().getFullYear();
   const statusByTeam: Map<string, GameStatus> =
@@ -461,6 +479,7 @@ export default async function DashboardPage({
               <MatchupsTab
                 needsSetup={needsSetup}
                 needsReconnectIds={needsReconnectIds}
+                teamCounts={teamCounts}
                 matchups={matchups}
                 statusByTeam={statusByTeam}
               />

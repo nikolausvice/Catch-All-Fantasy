@@ -50,7 +50,7 @@ export function RefreshButton() {
             header. Sized up on its own (rather than via headerButtonClass,
             shared with those other buttons' text) since a bare glyph reads
             smaller than actual text at the same font size. */}
-        <span className="text-lg leading-none">↻</span>
+        <span className="text-2xl leading-none">↻</span>
       </button>
     </div>
   );
